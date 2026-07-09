@@ -137,6 +137,12 @@ def start_interactive_loop() -> None:
 def main() -> None:
     # Check if arguments are passed directly
     if len(sys.argv) > 1:
+        # Check if the user wants to launch the GUI overlay
+        if sys.argv[1] == "--gui":
+            from elora.gui import start_gui
+            start_gui()
+            return
+            
         prompt = " ".join(sys.argv[1:])
         execute_single_prompt(prompt)
         return

@@ -9,5 +9,6 @@ dependencies = [
     "feedparser>=6.0.12",
     "ollama>=0.6.2",
     "playwright>=1.61.0",
+    "pyside6>=6.11.1",
     "requests>=2.34.2",
 ]
