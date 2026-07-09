@@ -78,8 +78,32 @@ def load_config() -> Dict[str, Any]:
             else:
                 merged[key] = val
                 
+        # Apply in-memory overrides
+        for key, val in _override_config.items():
+            if isinstance(val, dict) and key in merged and isinstance(merged[key], dict):
+                merged[key].update(val)
+            else:
+                merged[key] = val
+                
         logger.debug("Successfully loaded user configuration from %s", CONFIG_PATH)
         return merged
     except Exception as e:
         logger.error("Failed to read user configuration from %s (falling back to defaults): %s", CONFIG_PATH, e)
-        return DEFAULT_SETTINGS
+        # Apply in-memory overrides to defaults as well
+        fallback = DEFAULT_SETTINGS.copy()
+        for key, val in _override_config.items():
+            if isinstance(val, dict) and key in fallback and isinstance(fallback[key], dict):
+                fallback[key].update(val)
+            else:
+                fallback[key] = val
+        return fallback
+
+
+_override_config: Dict[str, Any] = {}
+
+
+def set_config_override(key: str, value: Any) -> None:
+    """Sets an in-memory override value for dynamic application configurations."""
+    global _override_config
+    _override_config[key] = value
+

@@ -139,13 +139,55 @@ def start_interactive_loop() -> None:
             break
 
 
+def start_voice_assistant_loop() -> None:
+    """
+    Runs a hands-free conversational voice assistant loop.
+    Repeatedly listens for voice input, executes prompt, and speaks response.
+    """
+    from elora.stt import listen_voice
+    from elora.config import set_config_override
+    from elora.utils import play_chime
+    import os
+    
+    chime_path = "/home/usoy/Documents/antigravity/elora/assets/sounds/success-chime.mp3"
+    
+    print("===========================================")
+    print("  ELORA Voice Assistant Loop (Hands-Free)  ")
+    print("===========================================")
+    print("Make sure your microphone is unmuted.")
+    print("Speak clearly. Elora auto-detects silence when you finish.")
+    print("Press Ctrl+C at any time to exit.\n")
+    
+    # Dynamically force-enable voice output for this session
+    set_config_override("voice", {"enabled": True})
+    
+    while True:
+        try:
+            # Play a short alert chime so the user knows they can speak
+            if os.path.exists(chime_path):
+                play_chime(chime_path)
+                
+            user_input = listen_voice()
+            if not user_input:
+                continue
+                
+            print(f"\nYou said: \"{user_input}\"")
+            
+            # Execute the prompt
+            execute_single_prompt(user_input)
+            add_to_history("user", user_input)
+            
+        except KeyboardInterrupt:
+            print("\nGoodbye!")
+            break
+
+
 def main() -> None:
     # Check if arguments are passed directly
     if len(sys.argv) > 1:
-        # Check if the user wants to launch the GUI overlay
-        if sys.argv[1] == "--gui":
-            from elora.gui import start_gui
-            start_gui()
+        # Check if the user wants to launch the voice assistant loop
+        if sys.argv[1] == "--voice":
+            start_voice_assistant_loop()
             return
             
         prompt = " ".join(sys.argv[1:])
