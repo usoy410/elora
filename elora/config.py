@@ -25,7 +25,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
             "https://techcrunch.com/feed/",
             "https://news.google.com/rss"
         ],
-        "limit_per_feed": 3
+        "limit_per_feed": 3,
+        "custom_blogs": []
     },
     "sound": {
         "enabled": True,

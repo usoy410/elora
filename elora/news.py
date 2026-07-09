@@ -23,6 +23,50 @@ DEFAULT_FEEDS = [
 _article_cache: List[Dict[str, str]] = []
 
 
+def scrape_custom_blog(url: str, title_selector: str, link_selector: str, limit: int = 3) -> List[Dict[str, str]]:
+    """
+    Spawns a headless Playwright Chromium instance to load the page, render JS,
+    and extract article titles and links based on CSS selectors.
+    
+    Why: Handles modern technical blogs that lack standard RSS XML feeds.
+    """
+    articles = []
+    try:
+        from playwright.sync_api import sync_playwright
+        logger.info("Scraping RSS-less blog with Playwright: %s", url)
+        
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            # Set a standard timeout
+            page.goto(url, timeout=15000)
+            
+            title_locators = page.locator(title_selector)
+            link_locators = page.locator(link_selector)
+            
+            count = min(title_locators.count(), link_locators.count())
+            limit = min(count, limit)
+            
+            for i in range(limit):
+                title = title_locators.nth(i).inner_text().strip()
+                link = link_locators.nth(i).get_attribute("href")
+                if link:
+                    if not link.startswith("http"):
+                        from urllib.parse import urljoin
+                        link = urljoin(url, link)
+                        
+                    articles.append({
+                        "title": title or "No Title",
+                        "link": link,
+                        "source": url.split("//")[-1].split("/")[0]
+                    })
+                    
+            browser.close()
+    except Exception as e:
+        logger.error("Playwright scraping failed for %s: %s", url, e)
+    return articles
+
+
 def fetch_tech_news(feed_urls: List[str] = None, limit_per_feed: int = None) -> List[Dict[str, str]]:
     """
     Fetches articles from RSS feeds and normalizes them into standard items.
@@ -42,8 +86,8 @@ def fetch_tech_news(feed_urls: List[str] = None, limit_per_feed: int = None) -> 
     global _article_cache
     articles = []
     
+    # Fetch standard RSS XML feeds
     for url in feed_urls:
-
         try:
             logger.info("Fetching RSS feed: %s", url)
             feed = feedparser.parse(url)
@@ -62,9 +106,20 @@ def fetch_tech_news(feed_urls: List[str] = None, limit_per_feed: int = None) -> 
         except Exception as e:
             logger.error("Error parsing feed %s: %s", url, str(e))
             
+    # Fetch custom RSS-less blogs using Playwright
+    custom_blogs = news_config.get("custom_blogs", [])
+    for blog in custom_blogs:
+        url = blog.get("url")
+        t_sel = blog.get("title_selector")
+        l_sel = blog.get("link_selector")
+        if url and t_sel and l_sel:
+            blog_articles = scrape_custom_blog(url, t_sel, l_sel, limit=limit_per_feed)
+            articles.extend(blog_articles)
+            
     # Cache the list for subsequent deep dive reference
     _article_cache = articles
     return articles
+
 
 
 def get_news_summary() -> str:
