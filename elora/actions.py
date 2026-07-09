@@ -6,9 +6,36 @@ Manages spawning background agent tasks in tmux and launching system browsers.
 import subprocess
 import shlex
 import logging
+import threading
+import time
 from elora.utils import send_notification, play_chime
 
 logger = logging.getLogger("elora.actions")
+
+
+def _monitor_session(session_name: str, task_prompt: str) -> None:
+    """
+    Background worker that polls tmux to check if the session is still active.
+    When the session exits, it alerts the user via desktop notification and sound.
+    
+    Why: Keeps Elora informed of background task completion, establishing a complete feedback loop.
+    """
+    logger.info("Started watcher thread for session: %s", session_name)
+    
+    # Poll every 2 seconds
+    while True:
+        time.sleep(2)
+        check_cmd = ["tmux", "has-session", "-t", session_name]
+        res = subprocess.run(check_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if res.returncode != 0:
+            # Session no longer exists (meaning the task finished and the shell exited)
+            break
+            
+    logger.info("Watcher detected exit for session: %s", session_name)
+    
+    # Send success chime and notification
+    send_notification("Task Completed", f"The background agent finished the task: {task_prompt}")
+    play_chime()
 
 
 def _get_unique_tmux_session(base_name: str = "elora-dev") -> str:
@@ -55,6 +82,10 @@ def execute_agent_task(prompt: str) -> str:
         logger.info("Spawning background agent task in tmux: %s", session_name)
         subprocess.Popen(tmux_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
+        # Spawn daemon watcher thread to play completion alerts when the tmux task exits
+        t = threading.Thread(target=_monitor_session, args=(session_name, prompt), daemon=True)
+        t.start()
+        
         # Notify the user
         notify_title = "Task Delegated"
         notify_msg = f"Task handed over to Antigravity CLI in background session '{session_name}'. I'll alert you when it's done."
@@ -69,6 +100,7 @@ def execute_agent_task(prompt: str) -> str:
         logger.error(err_msg)
         send_notification("Delegation Error", err_msg)
         return ""
+
 
 
 def open_browser_url(url: str) -> bool:
