@@ -29,7 +29,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     },
     "sound": {
         "enabled": True,
-        "chime_path": "/usr/share/sounds/alsa/Front_Center.wav"
+        "chime_path": "/home/usoy/Documents/antigravity/elora/assets/sounds/success-chime.mp3"
     },
     "browser": {
         "default_command": "xdg-open"

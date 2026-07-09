@@ -53,13 +53,22 @@ def play_chime(sound_path: Optional[str] = None) -> None:
         sound_path = sound_config.get("chime_path", "/usr/share/sounds/alsa/Front_Center.wav")
         
     try:
-        # aplay is the standard light-weight ALSA player on Linux
-        subprocess.Popen(
-            ["aplay", "-q", sound_path],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
+        if sound_path.lower().endswith((".mp3", ".ogg")):
+            # mpv is used to play mp3/ogg formats headlessly
+            subprocess.Popen(
+                ["mpv", "--no-video", "--volume=80", sound_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        else:
+            # aplay is the standard light-weight ALSA player on Linux for WAVs
+            subprocess.Popen(
+                ["aplay", "-q", sound_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
         logger.info("Audio chime played: %s", sound_path)
-    except FileNotFoundError:
-        logger.warning("aplay utility not found. Audio chime skipped.")
+    except FileNotFoundError as e:
+        logger.warning("Required audio player utility not found. Audio chime skipped: %s", e)
+
 
