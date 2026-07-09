@@ -32,6 +32,12 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         "enabled": True,
         "chime_path": "/home/usoy/Documents/antigravity/elora/assets/sounds/success-chime.mp3"
     },
+    "voice": {
+        "enabled": False,
+        "voice_name": "af_heart",
+        "speed": 1.0,
+        "quantized": True
+    },
     "browser": {
         "default_command": "xdg-open"
     }

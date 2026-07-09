@@ -265,6 +265,11 @@ class EloraGUI(QWidget):
             msg = args.get("message", "")
             self.output_label.setText(msg)
             
+            # Speak reply dynamically if enabled in config
+            from elora.voice import speak_text
+            speak_text(msg)
+            
+            
         elif action == "news_fetch":
             mode = args.get("mode", "skim")
             if mode == "skim":

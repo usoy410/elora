@@ -46,6 +46,11 @@ def process_action(payload: Dict[str, any]) -> None:
         print(f"\nElora: {message}\n")
         add_to_history("assistant", json.dumps(payload))
         
+        # Trigger speech synthesis dynamically if enabled
+        from elora.voice import speak_text
+        speak_text(message)
+        
+        
     elif action == "news_fetch":
         mode = args.get("mode", "skim")
         if mode == "skim":
