@@ -1,0 +1,12 @@
+[project]
+name = "elora"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "feedparser>=6.0.12",
+    "ollama>=0.6.2",
+    "requests>=2.34.2",
+]
