@@ -39,7 +39,7 @@ Ensure the following tools are installed on your Linux system:
 
 ## Usage
 
-Elora can be executed in three modes:
+Elora can be executed in five modes:
 
 ### 1. Interactive REPL Mode
 Start an interactive conversational loop:
@@ -59,6 +59,18 @@ Pipe commands directly into Elora:
 echo "Open the article for number 3" | uv run python main.py
 ```
 
+### 4. Hands-Free Voice Mode
+Start a hands-free voice loop that listens to your speech, auto-detects when you finish speaking, and responds out loud:
+```bash
+uv run python main.py --voice
+```
+
+### 5. Centralized HUD Dashboard Mode
+Launch a gorgeous graphical overlay panel showing chat logs, running background tasks, and active RSS telemetry. Hold down the `Spacebar` to speak, and release it to execute:
+```bash
+uv run python main.py --hud
+```
+
 ---
 
 ## Project Structure
@@ -68,4 +80,8 @@ echo "Open the article for number 3" | uv run python main.py
     *   [elora/brain.py](file:///home/usoy/Documents/antigravity/elora/elora/brain.py) — Handles prompt payloads and enforces JSON tool schema response formats.
     *   [elora/actions.py](file:///home/usoy/Documents/antigravity/elora/elora/actions.py) — Manages browser redirection and unique `tmux` session spawning.
     *   [elora/news.py](file:///home/usoy/Documents/antigravity/elora/elora/news.py) — Lightweight RSS news engine using `feedparser`.
+    *   [elora/voice.py](file:///home/usoy/Documents/antigravity/elora/elora/voice.py) — Lightweight local TTS synthesis using `kokoro-onnx` and `soundfile`.
+    *   [elora/stt.py](file:///home/usoy/Documents/antigravity/elora/elora/stt.py) — Local offline Speech-to-Text using `vosk` and `arecord` subprocess streaming.
+    *   [elora/hud.py](file:///home/usoy/Documents/antigravity/elora/elora/hud.py) — Centralized UI card widget overlay supporting Spacebar Hold-to-Talk.
     *   [elora/utils.py](file:///home/usoy/Documents/antigravity/elora/elora/utils.py) — Linux desktop notifications and sound effects.
+

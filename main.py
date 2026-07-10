@@ -190,6 +190,12 @@ def main() -> None:
             start_voice_assistant_loop()
             return
             
+        # Check if the user wants to launch the centralized HUD v2 window
+        if sys.argv[1] == "--hud":
+            from elora.hud import start_hud
+            start_hud()
+            return
+            
         prompt = " ".join(sys.argv[1:])
         execute_single_prompt(prompt)
         return
