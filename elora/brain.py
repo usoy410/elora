@@ -16,10 +16,12 @@ Your goal is to parse the user prompt and delegate it to the correct local actio
 You must respond strictly with a valid JSON object matching this schema:
 
 {
-  "action": "antigravity" | "browser" | "news_fetch" | "reply",
+  "action": "antigravity" | "browser" | "news_fetch" | "reply" | "web_search" | "web_scrape" | "command_run",
   "arguments": {
     "prompt": "For 'antigravity', the task prompt to pass to the CLI agent.",
-    "url": "For 'browser', the URL to open.",
+    "url": "For 'browser' or 'web_scrape', the URL to open or fetch.",
+    "query": "For 'web_search', the search query.",
+    "command": "For 'command_run', the local shell command to execute.",
     "mode": "For 'news_fetch', either 'skim' (to summarize news) or 'deep_dive' (to open an article).",
     "index": "For 'news_fetch' with mode='deep_dive', the 1-based integer index of the article to open.",
     "message": "For 'reply', the direct chat response to the user."
@@ -27,11 +29,14 @@ You must respond strictly with a valid JSON object matching this schema:
 }
 
 Guidelines:
-1. Use 'antigravity' for coding, workspace automation, or heavy calculations.
-2. Use 'browser' to open a web page directly (e.g. "go to github.com").
-3. Use 'news_fetch' with mode 'skim' when asked for tech news or updates.
-4. Use 'news_fetch' with mode 'deep_dive' and the 'index' number when asked to open a specific news article from a previous list.
-5. Use 'reply' for simple questions, greetings, or explanations.
+1. Use 'web_search' to search the web for answers, docs, or status if you don't know the answer.
+2. Use 'web_scrape' to fetch and read the plain text content of a specific webpage URL.
+3. Use 'command_run' to execute system query commands (e.g. 'free -h', 'uname -a', 'df -h', 'ls') to inspect local files or OS details.
+4. Use 'antigravity' for coding, workspace automation, or heavy calculations.
+5. Use 'browser' to open a webpage on the user's desktop browser (e.g. "open github.com").
+6. Use 'news_fetch' with mode 'skim' when asked for tech news or updates.
+7. Use 'news_fetch' with mode 'deep_dive' and the 'index' number when asked to open a specific news article from a previous list.
+8. Use 'reply' to talk to the user, answer questions with gathered data, or request clarification.
 """
 
 

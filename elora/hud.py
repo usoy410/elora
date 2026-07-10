@@ -77,9 +77,10 @@ class STTWorkerThread(QThread):
 
 class BrainWorkerThread(QThread):
     """
-    Worker thread to execute Ollama client queries asynchronously.
+    Worker thread to execute Ollama client queries and ReAct agent loops asynchronously.
     """
     query_finished = Signal(dict)
+    status_changed = Signal(str)
 
     def __init__(self, prompt: str, history: list):
         super().__init__()
@@ -88,7 +89,12 @@ class BrainWorkerThread(QThread):
 
     def run(self):
         try:
-            res = query_elora(self.prompt, history=self.history)
+            from elora.agent import run_agent_loop
+            
+            def emit_status(status_text: str):
+                self.status_changed.emit(status_text)
+                
+            res = run_agent_loop(self.prompt, self.history, emit_status)
             self.query_finished.emit(res)
         except Exception as e:
             logger.error("Brain worker failed: %s", e)
@@ -410,13 +416,23 @@ class EloraHUD(QWidget):
             return
 
         self.console_output.append(f"<span style='color: #10B981;'>You:</span> {text}")
+        self.session_history.append({"role": "user", "content": text})
+        if len(self.session_history) > 10:
+            self.session_history.pop(0)
+
         self.state_label.setText("THINKING...")
         self.orb.set_state("thinking")
 
         # Spawn Ollama worker thread
         self.brain_worker = BrainWorkerThread(text, self.session_history)
+        self.brain_worker.status_changed.connect(self.handle_status_change)
         self.brain_worker.query_finished.connect(self.handle_brain_response)
         self.brain_worker.start()
+
+    @Slot(str)
+    def handle_status_change(self, status_text: str):
+        """Displays intermediate tool execution updates in the logs."""
+        self.console_output.append(f"<span style='color: rgba(255, 255, 255, 0.45);'>System: {status_text}</span>")
 
     @Slot(dict)
     def handle_brain_response(self, result: dict):
@@ -427,13 +443,12 @@ class EloraHUD(QWidget):
         # Default to standby after query finishes
         self.reset_to_idle()
 
-        # Update chat history
-        self.session_history.append({"role": "user", "content": args.get("message", "")})
-        if len(self.session_history) > 10:
-            self.session_history.pop(0)
-
         if action == "reply":
             msg = args.get("message", "")
+            self.session_history.append({"role": "assistant", "content": msg})
+            if len(self.session_history) > 10:
+                self.session_history.pop(0)
+                
             self.console_output.append(f"<span style='color: #6366F1;'>Elora:</span> {msg}")
             
             # Speak reply out loud using kokoro-onnx

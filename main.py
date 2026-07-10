@@ -105,9 +105,15 @@ def process_action(payload: Dict[str, any]) -> None:
 
 def execute_single_prompt(prompt: str) -> None:
     """
-    Runs a single prompt non-interactively and processes the output.
+    Runs a single prompt through the ReAct agent loop and processes the final action.
     """
-    result = query_elora(prompt, history=session_history)
+    from elora.agent import run_agent_loop
+    
+    def print_status(status_text: str):
+        print(f"[*] {status_text}")
+        
+    add_to_history("user", prompt)
+    result = run_agent_loop(prompt, session_history, print_status)
     process_action(result)
 
 
@@ -132,7 +138,6 @@ def start_interactive_loop() -> None:
                 break
                 
             execute_single_prompt(user_input)
-            add_to_history("user", user_input)
             
         except (KeyboardInterrupt, EOFError):
             print("\nGoodbye!")
@@ -175,7 +180,6 @@ def start_voice_assistant_loop() -> None:
             
             # Execute the prompt
             execute_single_prompt(user_input)
-            add_to_history("user", user_input)
             
         except KeyboardInterrupt:
             print("\nGoodbye!")
