@@ -206,6 +206,51 @@ class OrbWidget(QWidget):
         painter.drawEllipse(center_x - radius, center_y - radius, radius * 2.0, radius * 2.0)
 
 
+class EloraModalOverlay(QWidget):
+    """A floating modal overlay that displays the collapsible sidebar panels in the center."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("ModalOverlay")
+        self.setStyleSheet("""
+            QWidget#ModalOverlay {
+                background-color: rgba(0, 0, 0, 0.45);
+            }
+        """)
+        # Centered layout
+        self.overlay_layout = QHBoxLayout(self)
+        self.overlay_layout.setContentsMargins(0, 0, 0, 0)
+        self.overlay_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Center card container
+        self.modal_card = QWidget(self)
+        self.modal_card.setObjectName("ModalCard")
+        self.modal_card.setFixedWidth(420)
+        self.modal_card.setFixedHeight(650)
+        self.modal_card.setStyleSheet("""
+            QWidget#ModalCard {
+                background-color: rgba(15, 17, 26, 0.85);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 16px;
+            }
+        """)
+        self.card_layout = QVBoxLayout(self.modal_card)
+        self.card_layout.setContentsMargins(20, 20, 20, 20)
+        self.card_layout.setSpacing(15)
+        
+        self.overlay_layout.addWidget(self.modal_card)
+        self.close_callback = None
+
+    def mousePressEvent(self, event):
+        # Close modal if clicking outside the modal_card
+        pos = event.position() if hasattr(event, 'position') else event.localPos()
+        if not self.modal_card.geometry().contains(pos.toPoint()):
+            if self.close_callback:
+                self.close_callback()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+
 class EloraHUD(QWidget):
     """Centralized HUD interface styled with modern dark obsidian cards."""
     def __init__(self):
@@ -230,58 +275,58 @@ class EloraHUD(QWidget):
                 background: transparent;
             }
             QWidget#CentralCard {
-                background-color: rgba(10, 11, 18, 0.6);
-                border: 1px solid rgba(255, 255, 255, 0.12);
-                border-radius: 20px;
+                background-color: transparent;
+                border: none;
             }
             QLabel {
                 color: #FFFFFF;
                 font-family: 'Inter', sans-serif;
             }
             QTextBrowser, QTextEdit {
-                background-color: rgba(255, 255, 255, 0.03);
-                border: 1px solid rgba(255, 255, 255, 0.06);
+                background-color: rgba(15, 17, 26, 0.5);
+                border: 1px solid rgba(255, 255, 255, 0.12);
                 border-radius: 10px;
                 color: #E5E7EB;
                 font-family: 'Inter', sans-serif;
                 font-size: 13px;
-                padding: 10px;
+                padding: 12px;
             }
             QListWidget {
-                background-color: rgba(255, 255, 255, 0.02);
-                border: 1px solid rgba(255, 255, 255, 0.05);
+                background-color: rgba(15, 17, 26, 0.5);
+                border: 1px solid rgba(255, 255, 255, 0.12);
                 border-radius: 10px;
                 color: #E5E7EB;
                 font-family: 'Inter', sans-serif;
                 font-size: 12px;
+                padding: 8px;
             }
             QListWidget::item {
                 border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-                padding: 6px;
+                padding: 8px;
             }
             QPushButton {
-                background-color: rgba(255, 255, 255, 0.05);
-                border: 1px solid rgba(255, 255, 255, 0.08);
+                background-color: rgba(15, 17, 26, 0.5);
+                border: 1px solid rgba(255, 255, 255, 0.12);
                 border-radius: 8px;
                 color: #F3F4F6;
                 font-family: 'Inter', sans-serif;
                 font-size: 12px;
                 font-weight: bold;
-                padding: 8px 14px;
+                padding: 10px 18px;
             }
             QPushButton:hover {
-                background-color: rgba(255, 255, 255, 0.1);
-                border-color: rgba(255, 255, 255, 0.15);
+                background-color: rgba(255, 255, 255, 0.15);
+                border-color: rgba(255, 255, 255, 0.2);
             }
             QPushButton:pressed {
-                background-color: rgba(255, 255, 255, 0.15);
+                background-color: rgba(255, 255, 255, 0.25);
             }
             QComboBox {
-                background-color: #171822;
-                border: 1px solid rgba(255, 255, 255, 0.08);
+                background-color: rgba(15, 17, 26, 0.5);
+                border: 1px solid rgba(255, 255, 255, 0.12);
                 border-radius: 6px;
                 color: #FFFFFF;
-                padding: 6px;
+                padding: 8px;
                 font-family: 'Inter', sans-serif;
             }
             QComboBox QAbstractItemView {
@@ -289,6 +334,19 @@ class EloraHUD(QWidget):
                 border: 1px solid rgba(255, 255, 255, 0.12);
                 color: #FFFFFF;
                 selection-background-color: rgba(255, 255, 255, 0.08);
+            }
+            QLineEdit {
+                background-color: rgba(15, 17, 26, 0.5);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 8px;
+                color: #FFFFFF;
+                font-family: 'Inter', sans-serif;
+                font-size: 12px;
+                padding: 8px 12px;
+            }
+            QLineEdit:focus {
+                border-color: rgba(129, 140, 248, 0.6);
+                background-color: rgba(15, 17, 26, 0.7);
             }
             QCheckBox {
                 color: #E5E7EB;
@@ -300,18 +358,14 @@ class EloraHUD(QWidget):
 
         # Main Layout
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(10, 10, 10, 10)
+        self.main_layout.setContentsMargins(40, 40, 40, 40)
 
         self.central_card = QWidget(self)
         self.central_card.setObjectName("CentralCard")
         self.main_layout.addWidget(self.central_card)
 
-        # Drop shadow effect
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(25)
-        shadow.setColor(QColor(0, 0, 0, 160))
-        shadow.setOffset(0, 8)
-        self.central_card.setGraphicsEffect(shadow)
+        # Drop shadow effect disabled on the main card as it is fully transparent now.
+        # We will apply a drop shadow to the modal overlay card instead.
 
         self.card_layout = QHBoxLayout(self.central_card)
         self.card_layout.setContentsMargins(20, 20, 20, 20)
@@ -378,9 +432,9 @@ class EloraHUD(QWidget):
 
         # Telemetry Row (System stats: CPU / RAM / TMUX)
         self.telemetry_frame = QFrame(self)
-        self.telemetry_frame.setStyleSheet("background-color: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 8px;")
+        self.telemetry_frame.setStyleSheet("background-color: rgba(15, 17, 26, 0.5); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px;")
         self.telemetry_layout = QHBoxLayout(self.telemetry_frame)
-        self.telemetry_layout.setContentsMargins(12, 8, 12, 8)
+        self.telemetry_layout.setContentsMargins(16, 12, 16, 12)
         
         self.lbl_cpu = QLabel("CPU Load: --", self)
         self.lbl_cpu.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 11px; color: rgba(255,255,255,0.7);")
@@ -392,7 +446,12 @@ class EloraHUD(QWidget):
         self.telemetry_layout.addWidget(self.lbl_cpu)
         self.telemetry_layout.addWidget(self.lbl_ram)
         self.telemetry_layout.addWidget(self.lbl_tasks)
-        self.left_layout.addWidget(self.telemetry_frame)
+        
+        # Center telemetry frame horizontally
+        self.left_layout.addWidget(self.telemetry_frame, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Vertical stretch above Orb
+        self.left_layout.addStretch(1)
 
         # Center AI Orb section
         self.orb_section = QWidget(self)
@@ -404,24 +463,26 @@ class EloraHUD(QWidget):
         self.state_label = QLabel("[ HOLD ALT TO TALK ]", self)
         self.state_label.setStyleSheet("color: rgba(255, 255, 255, 0.4); font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; letter-spacing: 2px;")
         self.orb_layout.addWidget(self.state_label, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.left_layout.addWidget(self.orb_section)
+        self.left_layout.addWidget(self.orb_section, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Vertical stretch below Orb
+        self.left_layout.addStretch(1)
 
         # Bottom section: Tip Label
-
         self.ptt_tip = QLabel("[ Hold ALT to Speak ]   •   [ Press ESC to Exit ]", self)
         self.ptt_tip.setStyleSheet("color: rgba(255, 255, 255, 0.3); font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold;")
         self.left_layout.addWidget(self.ptt_tip, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self.card_layout.addWidget(self.left_dashboard, stretch=3)
+        self.card_layout.addWidget(self.left_dashboard)
 
         # =====================================================================
         # COLLAPSIBLE SIDEBAR PANEL (Right)
         # =====================================================================
         self.sidebar_widget = QWidget(self)
         self.sidebar_widget.setObjectName("SidebarWidget")
-        self.sidebar_widget.setFixedWidth(360)
+        self.sidebar_widget.setFixedWidth(380)
         self.sidebar_layout = QVBoxLayout(self.sidebar_widget)
-        self.sidebar_layout.setContentsMargins(5, 0, 5, 0)
+        self.sidebar_layout.setContentsMargins(0, 0, 0, 0)
         self.sidebar_layout.setSpacing(10)
 
         # Sidebar Title & Close Action
@@ -603,21 +664,6 @@ class EloraHUD(QWidget):
         
         self.txt_custom_personality = QLineEdit(self)
         self.txt_custom_personality.setPlaceholderText("Enter custom personality (e.g. sarcastic pirate, helpful friend)...")
-        self.txt_custom_personality.setStyleSheet("""
-            QLineEdit {
-                background-color: rgba(255, 255, 255, 0.04);
-                border: 1px solid rgba(255, 255, 255, 0.08);
-                border-radius: 8px;
-                color: #FFFFFF;
-                font-family: 'Inter', sans-serif;
-                font-size: 12px;
-                padding: 6px 10px;
-            }
-            QLineEdit:focus {
-                border-color: rgba(129, 140, 248, 0.6);
-                background-color: rgba(255, 255, 255, 0.06);
-            }
-        """)
         
         # Load custom personality description with backward compatibility for legacy custom_instructions
         current_custom = self.config.get("custom_personality")
@@ -639,7 +685,6 @@ class EloraHUD(QWidget):
         self.txt_api_key = QLineEdit(self)
         self.txt_api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.txt_api_key.setPlaceholderText("Enter your Gemini API key...")
-        self.txt_api_key.setStyleSheet(self.txt_custom_personality.styleSheet())
         self.txt_api_key.setText(self.config.get("gemini_api_key", ""))
         self.settings_layout.addWidget(self.txt_api_key)
         
@@ -748,14 +793,25 @@ class EloraHUD(QWidget):
         self.browser_refresh_timer.start(2000)
 
         self.sidebar_layout.addWidget(self.stacked_widget)
-        self.card_layout.addWidget(self.sidebar_widget)
+        
+        # Create the modal overlay as a child of EloraHUD
+        self.modal_overlay = EloraModalOverlay(self)
+        self.modal_overlay.card_layout.addWidget(self.sidebar_widget)
+        self.modal_overlay.close_callback = self.close_sidebar
+        self.modal_overlay.hide()
+
+        # Add drop shadow to the modal card inside the overlay
+        modal_shadow = QGraphicsDropShadowEffect(self)
+        modal_shadow.setBlurRadius(30)
+        modal_shadow.setColor(QColor(0, 0, 0, 180))
+        modal_shadow.setOffset(0, 10)
+        self.modal_overlay.modal_card.setGraphicsEffect(modal_shadow)
 
         # Initially, keep sidebar closed
         self.sidebar_widget.hide()
-        self.setFixedWidth(560)
 
-        # Center on screen
-        self.center_on_screen()
+        # Start maximized to preserve transparency/compositing on Linux window managers
+        self.showMaximized()
 
         # Telemetry & Monitors Updates
         self.telemetry_timer = QTimer(self)
@@ -792,9 +848,12 @@ class EloraHUD(QWidget):
             self.lbl_browser_status.setText("CDP Connection: Standing by")
 
     def center_on_screen(self):
-        screen = QApplication.primaryScreen().geometry()
-        size = self.geometry()
-        self.move((screen.width() - size.width()) / 2, (screen.height() - size.height()) / 2)
+        pass
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "modal_overlay") and self.modal_overlay:
+            self.modal_overlay.setGeometry(self.rect())
 
     # =====================================================================
     # Sidebar Collapse/Expansion Mechanics
@@ -811,8 +870,9 @@ class EloraHUD(QWidget):
             self.active_sidebar_tab = tab_index
             self.stacked_widget.setCurrentIndex(tab_index)
             self.sidebar_widget.show()
-            self.setFixedWidth(940)
-            self.center_on_screen()
+            self.modal_overlay.setGeometry(self.rect())
+            self.modal_overlay.show()
+            self.modal_overlay.raise_()
             
             # Lazy load news feeds only when the News Telemetry tab is opened
             if tab_index == 4:
@@ -824,8 +884,7 @@ class EloraHUD(QWidget):
         """Collapses the sidebar widget back to minimal HUD layout."""
         self.active_sidebar_tab = -1
         self.sidebar_widget.hide()
-        self.setFixedWidth(560)
-        self.center_on_screen()
+        self.modal_overlay.hide()
 
     # =====================================================================
     # Real-Time Telemetry Gatherers
@@ -959,6 +1018,9 @@ class EloraHUD(QWidget):
                         self.start_voice_recording()
                 return True  # Consume the key event
             elif event.key() == Qt.Key.Key_Escape:
+                if hasattr(self, "modal_overlay") and self.modal_overlay.isVisible():
+                    self.close_sidebar()
+                    return True
                 if self.record_process:
                     self.record_process.terminate()
                     self.record_process.wait()

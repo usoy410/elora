@@ -103,7 +103,7 @@ uv run python main.py --voice
 ```
 
 ### 5. Centralized HUD Dashboard Mode
-Launch a gorgeous graphical overlay panel showing chat logs, running background tasks, and active RSS telemetry. Hold down the `Spacebar` to speak, release it to execute, and access settings via the interface:
+Launch a gorgeous, transparent, maximized graphical overlay featuring a glassmorphic floating controller and centered voice pulse orb. Access chat logs, tools, settings, and news feeds via centered modal overlay panels. Hold down the `Alt` key to speak, release it to execute, and press `Esc` to close a modal or exit:
 ```bash
 uv run python main.py --hud
 ```
