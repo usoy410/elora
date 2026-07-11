@@ -233,7 +233,7 @@ class EloraHUD(QWidget):
                 background: transparent;
             }
             QWidget#CentralCard {
-                background-color: rgba(10, 11, 18, 0.2);
+                background-color: rgba(10, 11, 18, 0.6);
                 border: 1px solid rgba(255, 255, 255, 0.12);
                 border-radius: 20px;
             }
@@ -361,16 +361,22 @@ class EloraHUD(QWidget):
         self.btn_browser.setIcon(QIcon.fromTheme("web-browser"))
         self.btn_browser.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         
+        self.btn_news = QPushButton("News", self)
+        self.btn_news.setIcon(QIcon.fromTheme("news"))
+        self.btn_news.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        
         self.btn_tools.clicked.connect(lambda: self.toggle_sidebar(1))
         self.btn_chat.clicked.connect(lambda: self.toggle_sidebar(0))
         self.btn_settings.clicked.connect(lambda: self.toggle_sidebar(2))
         self.btn_browser.clicked.connect(lambda: self.toggle_sidebar(3))
-
+        self.btn_news.clicked.connect(lambda: self.toggle_sidebar(4))
+ 
         self.top_bar_layout.addWidget(self.btn_tools)
         self.top_bar_layout.addWidget(self.btn_chat)
+        self.top_bar_layout.addWidget(self.btn_news)
         self.top_bar_layout.addWidget(self.btn_settings)
         self.top_bar_layout.addWidget(self.btn_browser)
-
+ 
         self.left_layout.addWidget(self.top_bar)
 
         # Telemetry Row (System stats: CPU / RAM / TMUX)
@@ -403,14 +409,60 @@ class EloraHUD(QWidget):
         self.orb_layout.addWidget(self.state_label, alignment=Qt.AlignmentFlag.AlignCenter)
         self.left_layout.addWidget(self.orb_section)
 
-        # Bottom section: RSS Skimmer List Panel & Tip Label
-        lbl_recent = QLabel("TELEMETRY: RECENT ARTICLES", self)
-        lbl_recent.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
-        self.left_layout.addWidget(lbl_recent)
-        self.news_list = QListWidget(self)
-        self.news_list.setFixedHeight(110)
-        self.news_list.itemClicked.connect(self.on_news_clicked)
-        self.left_layout.addWidget(self.news_list)
+        # Text input field and Send button layout below the pulse circle
+        self.input_layout = QHBoxLayout()
+        self.input_layout.setContentsMargins(10, 5, 10, 10)
+        self.input_layout.setSpacing(8)
+        
+        self.input_box = QLineEdit(self)
+        self.input_box.setPlaceholderText("Type command or edit voice input...")
+        self.input_box.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.input_box.setStyleSheet("""
+            QLineEdit {
+                background-color: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 8px;
+                color: #FFFFFF;
+                font-family: 'Inter', sans-serif;
+                font-size: 12px;
+                padding: 6px 10px;
+            }
+            QLineEdit:focus {
+                border-color: rgba(129, 140, 248, 0.6);
+                background-color: rgba(255, 255, 255, 0.06);
+            }
+        """)
+        self.input_layout.addWidget(self.input_box)
+        
+        self.btn_send = QPushButton("Send", self)
+        self.btn_send.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_send.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(129, 140, 248, 0.15);
+                border: 1px solid rgba(129, 140, 248, 0.3);
+                border-radius: 8px;
+                color: #818CF8;
+                font-family: 'Inter', sans-serif;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 6px 12px;
+            }
+            QPushButton:hover {
+                background-color: rgba(129, 140, 248, 0.25);
+                border-color: rgba(129, 140, 248, 0.4);
+            }
+            QPushButton:pressed {
+                background-color: rgba(129, 140, 248, 0.35);
+            }
+        """)
+        self.input_layout.addWidget(self.btn_send)
+        
+        self.left_layout.addLayout(self.input_layout)
+        
+        self.input_box.returnPressed.connect(self.send_manual_input)
+        self.btn_send.clicked.connect(self.send_manual_input)
+
+        # Bottom section: Tip Label
 
         self.ptt_tip = QLabel("[ Hold SPACE to Speak ]   •   [ Press ESC to Exit ]", self)
         self.ptt_tip.setStyleSheet("color: rgba(255, 255, 255, 0.3); font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold;")
@@ -457,8 +509,9 @@ class EloraHUD(QWidget):
         self.chat_layout = QVBoxLayout(self.page_chat)
         self.chat_layout.setContentsMargins(0, 0, 0, 0)
         self.console_output = QTextBrowser(self)
-        self.console_output.append("<span style='color: #818CF8;'>Elora:</span> Centralized HUD ready. Hold <b>Spacebar</b> to talk, release to send.")
+        self.console_output.append("<span style='color: #818CF8;'>Elora:</span> Centralized HUD ready. Hold <b>Spacebar</b> to talk, edit the transcription in the text box on the left if needed, and press Enter to send.")
         self.chat_layout.addWidget(self.console_output)
+        
         self.stacked_widget.addWidget(self.page_chat)
 
         # ---------------------------------------------------------------------
@@ -646,6 +699,31 @@ class EloraHUD(QWidget):
         
         self.browser_layout.addStretch()
         self.stacked_widget.addWidget(self.page_browser)
+
+        # ---------------------------------------------------------------------
+        # Tab Page 4: RSS News / Telemetry
+        # ---------------------------------------------------------------------
+        self.page_news = QWidget(self)
+        self.news_layout = QVBoxLayout(self.page_news)
+        self.news_layout.setContentsMargins(5, 5, 5, 5)
+        self.news_layout.setSpacing(10)
+        
+        lbl_news_title = QLabel("TELEMETRY: RECENT ARTICLES", self)
+        lbl_news_title.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; color: rgba(255,255,255,0.6);")
+        self.news_layout.addWidget(lbl_news_title)
+        
+        self.news_list = QListWidget(self)
+        self.news_list.itemClicked.connect(self.on_news_clicked)
+        self.news_layout.addWidget(self.news_list)
+        
+        self.btn_refresh_news = QPushButton("Refresh Feeds", self)
+        self.btn_refresh_news.setIcon(QIcon.fromTheme("view-refresh"))
+        self.btn_refresh_news.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_refresh_news.clicked.connect(self.load_news_skimmer)
+        self.news_layout.addWidget(self.btn_refresh_news)
+        
+        self.news_layout.addStretch()
+        self.stacked_widget.addWidget(self.page_news)
         
         # Start a refresh timer to update screenshot every 2 seconds
         self.browser_refresh_timer = QTimer(self)
@@ -668,8 +746,7 @@ class EloraHUD(QWidget):
         self.telemetry_timer.start(1000)  # Refresh metrics every 1 second
         self.update_system_telemetry()
 
-        # Load RSS feeds list
-        QTimer.singleShot(400, self.load_news_skimmer)
+
 
         # Launch dynamic startup greeting welcoming user
         QTimer.singleShot(800, self.trigger_startup_greeting)
@@ -708,7 +785,7 @@ class EloraHUD(QWidget):
     def toggle_sidebar(self, tab_index: int):
         """Toggles the visibility of the action sidebar."""
         # Update title header text
-        titles = ["Conversation", "Tools", "Settings", "Browser Preview"]
+        titles = ["Conversation", "Tools", "Settings", "Browser Preview", "News Telemetry"]
         self.sidebar_title.setText(titles[tab_index])
         
         if self.active_sidebar_tab == tab_index:
@@ -719,6 +796,12 @@ class EloraHUD(QWidget):
             self.sidebar_widget.show()
             self.setFixedWidth(940)
             self.center_on_screen()
+            
+            # Lazy load news feeds only when the News Telemetry tab is opened
+            if tab_index == 4:
+                self.news_list.clear()
+                self.news_list.addItem("Loading news feeds...")
+                QTimer.singleShot(100, self.load_news_skimmer)
 
     def close_sidebar(self):
         """Collapses the sidebar widget back to minimal HUD layout."""
@@ -887,6 +970,7 @@ class EloraHUD(QWidget):
     def start_voice_recording(self):
         if self.is_recording:
             return
+        self.input_box.clear()
         self.is_recording = True
         self.update_state_ui("listening", "● LISTENING...")
         self.console_output.append("<br><span style='color: #EC4899;'>System:</span> Recording...")
@@ -900,7 +984,7 @@ class EloraHUD(QWidget):
         if status == "recording":
             pass
         elif status == "partial_stream":
-            self.state_label.setText(f"● {text.upper()}...")
+            self.input_box.setText(text)
         elif status == "final":
             self.handle_transcription(text)
         elif status == "error":
@@ -922,6 +1006,19 @@ class EloraHUD(QWidget):
             self.console_output.append("<span style='color: rgba(255,255,255,0.45);'>System: No speech detected.</span>")
             self.reset_to_idle()
             return
+
+        self.input_box.setText(text)
+        self.input_box.setFocus()
+        self.reset_to_idle()
+        self.console_output.append(f"<span style='color: #EC4899;'>System:</span> Transcribed: \"{text}\" (Edit if needed, then press Enter or click Send to submit)")
+
+    def send_manual_input(self):
+        text = self.input_box.text().strip()
+        if not text:
+            return
+            
+        self.input_box.clear()
+        self.input_box.clearFocus()
 
         self.console_output.append(f"<span style='color: #10B981;'>You:</span> {text}")
         self.session_history.append({"role": "user", "content": text})
@@ -994,8 +1091,22 @@ class EloraHUD(QWidget):
         elif action == "antigravity":
             task_prompt = args.get("prompt", "")
             if task_prompt:
-                self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> Spawning task: \"{task_prompt}\"")
-                session = execute_agent_task(task_prompt)
+                message = args.get("message", "")
+                if not message:
+                    if len(task_prompt) < 60:
+                        message = f"Okay, starting the task: {task_prompt}. I will let you know when it is finished."
+                    else:
+                        message = "I am launching the background agent to start the task. I will let you know once it is complete."
+                
+                self.session_history.append({"role": "assistant", "content": message})
+                if len(self.session_history) > 20:
+                    self.session_history.pop(0)
+                
+                self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {message}")
+                self.update_state_ui("speaking", "SPEAKING...")
+                QTimer.singleShot(1500, self.reset_to_idle)
+                
+                session = result.get("session")
                 if session:
                     self.console_output.append(f"<span style='color: #10B981;'>System: Task spawned successfully in tmux session '{session}'</span>")
                 else:
@@ -1109,7 +1220,30 @@ class EloraHUD(QWidget):
             open_browser_url(link)
 
 
+_hud_lock_socket = None
+
+
+def prevent_multiple_instances() -> bool:
+    """Uses a Linux abstract namespace socket to guarantee a single HUD instance."""
+    global _hud_lock_socket
+    import socket
+    try:
+        _hud_lock_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        # Bind to a unique abstract namespace socket (starts with \0)
+        # These are automatically released by the kernel when the process exits
+        _hud_lock_socket.bind('\0elora_hud_instance_lock')
+        return True
+    except socket.error:
+        return False
+
+
 def start_hud():
+    if not prevent_multiple_instances():
+        from elora.utils import send_notification
+        send_notification("Elora HUD", "Elora HUD is already running.")
+        print("Elora HUD is already running. Exiting.")
+        sys.exit(0)
+
     app = QApplication(sys.argv)
     hud = EloraHUD()
     hud.show()

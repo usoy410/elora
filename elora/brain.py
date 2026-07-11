@@ -30,7 +30,7 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
                         "browser_browse", "browser_click", "browser_type", "browser_get_elements",
                         "desktop_input", "system_control"]
     guidelines = [
-        "4. Use 'antigravity' for coding, workspace automation, or heavy calculations.",
+        "4. Use 'antigravity' for coding, workspace automation, or heavy calculations. Provide a conversational message in 'message' explaining what you are delegating.",
         "5. Use 'browser' to open a webpage on the user's desktop browser (e.g. \"open github.com\") using default xdg-open.",
         "6. Use 'news_fetch' with mode 'skim' when asked for tech news or updates.",
         "7. Use 'news_fetch' with mode 'deep_dive' and the 'index' number when asked to open a specific news article from a previous list.",
@@ -57,7 +57,7 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
         guidelines.insert(1, "2. Use 'web_scrape' to fetch and read the plain text content of a specific webpage URL.")
     if skills_cfg.get("command_run", True):
         allowed_actions.append("command_run")
-        guidelines.insert(2, "3. Use 'command_run' to execute system query commands (e.g. 'free -h', 'uname -a', 'df -h', 'ls') to inspect local files or OS details.")
+        guidelines.insert(2, "3. Use 'command_run' to execute local shell commands (e.g., copying/moving/deleting files, creating directories, running scripts, package commands, or system queries) to autonomously perform actions on behalf of the user.")
         
     actions_str = " | ".join(f'"{a}"' for a in allowed_actions)
     guidelines_str = "\n".join(guidelines)
@@ -77,7 +77,7 @@ You must respond strictly with a valid JSON object matching this schema:
     "index":             "For 'news_fetch' with mode='deep_dive', the 1-based integer index of the article to open.",
     "text":              "For 'memory_store' (fact statement), 'browser_type' (text to enter), or 'desktop_input' (text/shortcut to type).",
     "topic":             "For 'memory_store', a short lowercase topic label (e.g. 'linux', 'projects').",
-    "message":           "For 'reply', the direct chat response to the user.",
+    "message":           "For 'reply' or 'antigravity', the direct chat/spoken response to the user.",
     "selector_or_text":  "For 'browser_click' or 'browser_type', the CSS selector or the text label of the target element.",
     "input_type":        "For 'desktop_input', either 'move', 'click', 'type', or 'shortcut'.",
     "x":                 "For 'desktop_input' (integer X coordinate).",

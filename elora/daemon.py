@@ -312,6 +312,22 @@ def handle_client(conn: socket.socket):
                             add_to_history("assistant", json.dumps(result))
                             speak_text(msg)
 
+                        elif action == "antigravity":
+                            prompt = args.get("prompt", "")
+                            message = args.get("message", "")
+                            if not message:
+                                if len(prompt) < 60:
+                                    message = f"Okay, starting the task: {prompt}. I will let you know when it is finished."
+                                else:
+                                    message = "I am launching the background agent to start the task. I will let you know once it is complete."
+                            
+                            add_to_history("assistant", json.dumps(result))
+                            speak_text(message)
+                            
+                            from elora.actions import execute_agent_task
+                            session = execute_agent_task(prompt)
+                            result["session"] = session
+
                         conn.sendall((json.dumps({"status": "response", "result": result}) + "\n").encode("utf-8"))
 
 

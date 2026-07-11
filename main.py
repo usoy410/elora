@@ -89,7 +89,19 @@ def process_action(payload: Dict[str, any]) -> None:
     elif action == "antigravity":
         prompt = args.get("prompt", "")
         if prompt:
-            print(f"\nElora: delegating task to background session...")
+            message = args.get("message", "")
+            if not message:
+                if len(prompt) < 60:
+                    message = f"Okay, starting the task: {prompt}. I will let you know when it is finished."
+                else:
+                    message = "I am launching the background agent to start the task. I will let you know once it is complete."
+            
+            print(f"\nElora: {message}\n")
+            
+            # Trigger speech synthesis dynamically if enabled
+            from elora.voice import speak_text
+            speak_text(message)
+            
             session = execute_agent_task(prompt)
             if session:
                 print(f"Elora: Task active in background tmux session '{session}'.")
