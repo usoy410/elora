@@ -107,3 +107,35 @@ def set_config_override(key: str, value: Any) -> None:
     global _override_config
     _override_config[key] = value
 
+
+def save_config(config_updates: Dict[str, Any]) -> None:
+    """
+    Saves configuration updates to ~/.config/elora/config.json.
+    Merges updates into the actual file on disk, avoiding dynamically overridden session keys.
+    """
+    disk_config = {}
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r") as f:
+                disk_config = json.load(f)
+        except Exception:
+            disk_config = DEFAULT_SETTINGS.copy()
+    else:
+        disk_config = DEFAULT_SETTINGS.copy()
+
+    # Update values (deep copy merge)
+    for key, val in config_updates.items():
+        if isinstance(val, dict) and key in disk_config and isinstance(disk_config[key], dict):
+            disk_config[key].update(val)
+        else:
+            disk_config[key] = val
+
+    try:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(disk_config, f, indent=2)
+        logger.info("Saved configuration file to %s", CONFIG_PATH)
+    except Exception as e:
+        logger.error("Failed to save configuration: %s", e)
+
+

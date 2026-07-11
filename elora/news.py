@@ -124,7 +124,7 @@ def fetch_tech_news(feed_urls: List[str] = None, limit_per_feed: int = None) -> 
 
 def get_news_summary() -> str:
     """
-    Summarizes the top fetched articles into a clean Markdown format.
+    Summarizes the top fetched articles into a clean Markdown format for display.
     
     Why: Adheres to the 'Skim' option in the Elora blueprint.
     """
@@ -140,13 +140,36 @@ def get_news_summary() -> str:
     # Take up to the top 5 articles overall
     for i, art in enumerate(articles[:5], start=1):
         markdown_lines.append(f"{i}. **[{art['source']}]** {art['title']}")
-        markdown_lines.append(f"   *Link: {art['link']}*")
         
-    markdown_lines.append("\n*Tip: Say 'Open the full article for number <index>' to deep dive.*")
+    markdown_lines.append("\n*Say 'Open article number <index>' to open it in your browser.*")
     return "\n".join(markdown_lines)
 
 
-def open_article(index: int) -> bool:
+def get_spoken_news_summary() -> str:
+    """
+    Returns a concise, conversational TTS-friendly news summary.
+    Links and markdown are stripped; only source and title are included.
+
+    Why: Reading raw URLs or markdown aloud sounds unnatural. This function
+    produces speech that mirrors how a human assistant would describe headlines.
+    """
+    # Re-use the already-cached articles from the last fetch
+    articles = _article_cache if _article_cache else fetch_tech_news()
+    if not articles:
+        return "I couldn't fetch any news right now."
+
+    top = articles[:5]
+    lines = ["Here are your top headlines."]
+    for i, art in enumerate(top, start=1):
+        source = art.get("source", "")
+        title = art.get("title", "")
+        lines.append(f"Number {i}, from {source}: {title}.")
+
+    lines.append("Say 'open article number' followed by the index to open it in Brave.")
+    return " ".join(lines)
+
+
+def open_article(index) -> bool:
     """
     Launches default system web browser to open the chosen cached article.
     
@@ -154,6 +177,12 @@ def open_article(index: int) -> bool:
     """
     global _article_cache
     
+    try:
+        index = int(index)
+    except (ValueError, TypeError):
+        logger.warning("Invalid article index requested: %s", str(index))
+        return False
+        
     # Normalize index (1-based index to 0-based index)
     cached_idx = index - 1
     if not _article_cache:

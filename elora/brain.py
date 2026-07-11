@@ -11,13 +11,50 @@ from elora.config import load_config
 
 logger = logging.getLogger("elora.brain")
 
-SYSTEM_INSTRUCTION = """You are Elora, an intelligent OS orchestrator and Linux assistant.
-Your goal is to parse the user prompt and delegate it to the correct local action block.
+DEFAULT_CUSTOM_INSTRUCTION = (
+    "You are Elora, an intelligent OS orchestrator and Linux assistant. "
+    "Your goal is to parse the user prompt and delegate it to the correct local action block."
+)
+
+
+def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
+    """
+    Builds the system instruction dynamically, tailoring active guidelines and
+    the JSON schema to the user's enabled skills.
+    """
+    custom_prompt = config.get("custom_instructions", DEFAULT_CUSTOM_INSTRUCTION)
+    skills_cfg = config.get("skills", {"web_search": True, "web_scrape": True, "command_run": True})
+    
+    allowed_actions = ["antigravity", "browser", "news_fetch", "reply"]
+    guidelines = [
+        "4. Use 'antigravity' for coding, workspace automation, or heavy calculations.",
+        "5. Use 'browser' to open a webpage on the user's desktop browser (e.g. \"open github.com\").",
+        "6. Use 'news_fetch' with mode 'skim' when asked for tech news or updates.",
+        "7. Use 'news_fetch' with mode 'deep_dive' and the 'index' number when asked to open a specific news article from a previous list.",
+        "8. Use 'reply' to talk to the user, answer questions with gathered data, or request clarification."
+    ]
+    
+    # Prepend dynamic options if enabled
+    if skills_cfg.get("web_search", True):
+        allowed_actions.append("web_search")
+        guidelines.insert(0, "1. Use 'web_search' to search the web for answers, docs, or status if you don't know the answer.")
+    if skills_cfg.get("web_scrape", True):
+        allowed_actions.append("web_scrape")
+        guidelines.insert(1, "2. Use 'web_scrape' to fetch and read the plain text content of a specific webpage URL.")
+    if skills_cfg.get("command_run", True):
+        allowed_actions.append("command_run")
+        guidelines.insert(2, "3. Use 'command_run' to execute system query commands (e.g. 'free -h', 'uname -a', 'df -h', 'ls') to inspect local files or OS details.")
+        
+    actions_str = " | ".join(f'"{a}"' for a in allowed_actions)
+    guidelines_str = "\n".join(guidelines)
+    
+    return f"""{custom_prompt}
+
 You must respond strictly with a valid JSON object matching this schema:
 
-{
-  "action": "antigravity" | "browser" | "news_fetch" | "reply" | "web_search" | "web_scrape" | "command_run",
-  "arguments": {
+{{
+  "action": {actions_str},
+  "arguments": {{
     "prompt": "For 'antigravity', the task prompt to pass to the CLI agent.",
     "url": "For 'browser' or 'web_scrape', the URL to open or fetch.",
     "query": "For 'web_search', the search query.",
@@ -25,18 +62,11 @@ You must respond strictly with a valid JSON object matching this schema:
     "mode": "For 'news_fetch', either 'skim' (to summarize news) or 'deep_dive' (to open an article).",
     "index": "For 'news_fetch' with mode='deep_dive', the 1-based integer index of the article to open.",
     "message": "For 'reply', the direct chat response to the user."
-  }
-}
+  }}
+}}
 
 Guidelines:
-1. Use 'web_search' to search the web for answers, docs, or status if you don't know the answer.
-2. Use 'web_scrape' to fetch and read the plain text content of a specific webpage URL.
-3. Use 'command_run' to execute system query commands (e.g. 'free -h', 'uname -a', 'df -h', 'ls') to inspect local files or OS details.
-4. Use 'antigravity' for coding, workspace automation, or heavy calculations.
-5. Use 'browser' to open a webpage on the user's desktop browser (e.g. "open github.com").
-6. Use 'news_fetch' with mode 'skim' when asked for tech news or updates.
-7. Use 'news_fetch' with mode 'deep_dive' and the 'index' number when asked to open a specific news article from a previous list.
-8. Use 'reply' to talk to the user, answer questions with gathered data, or request clarification.
+{guidelines_str}
 """
 
 
@@ -49,8 +79,9 @@ def query_elora(user_prompt: str, history: List[Dict[str, str]] = None) -> Dict[
     """
     config = load_config()
     model_name = config.get("model_name", "gpt-oss:120b-cloud")
+    sys_instruction = get_dynamic_system_instruction(config)
     
-    messages = [{"role": "system", "content": SYSTEM_INSTRUCTION}]
+    messages = [{"role": "system", "content": sys_instruction}]
     
     if history:
         messages.extend(history)

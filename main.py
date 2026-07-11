@@ -166,6 +166,27 @@ def start_voice_assistant_loop() -> None:
     # Dynamically force-enable voice output for this session
     set_config_override("voice", {"enabled": True})
     
+    # Dynamic startup greeting
+    print("Elora: Waking up...")
+    try:
+        from elora.brain import query_elora
+        from elora.voice import speak_text
+        greeting_res = query_elora(
+            "Generate a brief, warm, 1-sentence greeting welcoming the user. Introduce yourself as Elora, standing by. Respond strictly with a reply action.",
+            history=[]
+        )
+        msg = greeting_res.get("arguments", {}).get("message", "Hello, I am Elora. Standing by.")
+        print(f"Elora: {msg}\n")
+        speak_text(msg)
+        add_to_history("assistant", msg)
+    except Exception as e:
+        logger.error("Failed to generate voice loop startup greeting: %s", e)
+        fallback = "Hello, I am Elora. Standing by."
+        print(f"Elora: {fallback}\n")
+        from elora.voice import speak_text
+        speak_text(fallback)
+        add_to_history("assistant", fallback)
+    
     while True:
         try:
             # Play a short alert chime so the user knows they can speak
@@ -186,16 +207,65 @@ def start_voice_assistant_loop() -> None:
             break
 
 
+def ensure_daemon_running() -> None:
+    """Verifies if the background daemon is running. If not, spawns it as a subprocess."""
+    import socket
+    import subprocess
+    import time
+    
+    SOCKET_PATH = "/tmp/elora.sock"
+    try:
+        # Check connection
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(SOCKET_PATH)
+        s.close()
+        return
+    except Exception:
+        print("Elora: Background daemon not running. Spawning daemon in background...")
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # Detach child from parent process group so it runs persistent
+        subprocess.Popen(
+            [sys.executable, "-m", "elora.daemon"],
+            cwd=base_dir,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=os.setpgrp
+        )
+        
+        # Block briefly to wait for Unix socket creation
+        for _ in range(50):
+            if os.path.exists(SOCKET_PATH):
+                try:
+                    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    s.connect(SOCKET_PATH)
+                    s.close()
+                    print("Elora: Background daemon started successfully.")
+                    return
+                except Exception:
+                    pass
+            time.sleep(0.1)
+        print("Elora Warning: Spawning daemon timed out. Models might load slowly.")
+
+
 def main() -> None:
     # Check if arguments are passed directly
     if len(sys.argv) > 1:
+        # Check if the user wants to start the daemon process directly
+        if sys.argv[1] == "--daemon":
+            from elora.daemon import run_daemon
+            run_daemon()
+            return
+
         # Check if the user wants to launch the voice assistant loop
         if sys.argv[1] == "--voice":
+            ensure_daemon_running()
             start_voice_assistant_loop()
             return
             
         # Check if the user wants to launch the centralized HUD v2 window
         if sys.argv[1] == "--hud":
+            ensure_daemon_running()
             from elora.hud import start_hud
             start_hud()
             return

@@ -8,6 +8,7 @@ import os
 import sys
 import logging
 import urllib.request
+import subprocess
 import soundfile as sf
 from typing import Optional
 
@@ -18,6 +19,9 @@ logger = logging.getLogger("elora.voice")
 
 MODELS_DIR = os.path.expanduser("~/.config/elora/models")
 TEMP_SPEECH_PATH = os.path.expanduser("~/.config/elora/speech.wav")
+
+# Tracker for active speech playback subprocess
+_active_playback_process: Optional[subprocess.Popen] = None
 
 # GitHub release endpoints for the INT8 model and voices binary
 MODEL_INT8_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.int8.onnx"
@@ -101,12 +105,23 @@ def speak_text(text: str) -> None:
     Why: Saving to a temporary WAV and calling the existing play_chime() player
     prevents blocking execution threads in either the CLI loop or GUI window.
     """
+    global _active_playback_process
+    
     config = load_config()
     voice_config = config.get("voice", {})
     
     # Check if voice feedback is enabled
     if not voice_config.get("enabled", False):
         return
+        
+    # Stop any currently active speech subprocess first (singleton instance behavior)
+    if _active_playback_process is not None:
+        try:
+            _active_playback_process.terminate()
+            _active_playback_process.wait(timeout=0.3)
+        except Exception:
+            pass
+        _active_playback_process = None
         
     client = _get_kokoro_client()
     if client is None:
@@ -131,7 +146,7 @@ def speak_text(text: str) -> None:
         sf.write(TEMP_SPEECH_PATH, samples, sample_rate)
         logger.debug("Speech WAV written to %s", TEMP_SPEECH_PATH)
         
-        # Play the temporary WAV file using our async ALSA player
-        play_chime(TEMP_SPEECH_PATH)
+        # Play the temporary WAV file and store the running process handle
+        _active_playback_process = play_chime(TEMP_SPEECH_PATH)
     except Exception as e:
         logger.error("Failed to synthesize or play speech: %s", e)
