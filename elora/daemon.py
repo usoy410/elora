@@ -207,7 +207,12 @@ def handle_client(conn: socket.socket):
                         conn.sendall(b'{"status": "env_updated"}\n')
                         
                     elif cmd == "preload":
-                        logger.info("Daemon preloaded (Zero-Local-Model mode)...")
+                        logger.info("Daemon preloaded. Initiating model preloading...")
+                        try:
+                            from elora.voice import preload_voice_model
+                            threading.Thread(target=preload_voice_model, name="EloraVoicePreloadThread", daemon=True).start()
+                        except Exception as e:
+                            logger.error("Failed to preload voice model on cmd: %s", e)
                         conn.sendall(b'{"status": "ready"}\n')
                         
                     elif cmd == "start_listen":
@@ -344,6 +349,13 @@ def handle_client(conn: socket.socket):
                         session_history.clear()
                         conn.sendall(b'{"status": "reset"}\n')
                         
+                    elif cmd == "add_history":
+                        role = payload.get("role", "")
+                        content = payload.get("content", "")
+                        add_to_history(role, content)
+                        conn.sendall(b'{"status": "added"}\n')
+
+                        
                 except Exception as e:
                     logger.error("Error parsing/handling payload line: %s", e)
                     try:
@@ -372,6 +384,13 @@ def run_daemon():
     os.chmod(SOCKET_PATH, 0o777)
     
     logger.info("Elora Daemon active on Unix socket: %s", SOCKET_PATH)
+
+    # Preload Kokoro voice engine model in background to avoid latency on first request
+    try:
+        from elora.voice import preload_voice_model
+        threading.Thread(target=preload_voice_model, name="EloraVoicePreloadThread", daemon=True).start()
+    except Exception as e:
+        logger.error("Failed to initiate voice model preloading: %s", e)
 
     try:
         while True:

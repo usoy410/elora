@@ -179,25 +179,37 @@ def start_voice_assistant_loop() -> None:
     set_config_override("voice", {"enabled": True})
     
     # Dynamic startup greeting
-    print("Elora: Waking up...")
+    print("Elora: Standing by...")
     try:
-        from elora.brain import query_elora
         from elora.voice import speak_text
-        greeting_res = query_elora(
-            "Generate a brief, warm, 1-sentence greeting welcoming the user. Introduce yourself as Elora, standing by. Respond strictly with a reply action.",
-            history=[]
-        )
-        msg = greeting_res.get("arguments", {}).get("message", "Hello, I am Elora. Standing by.")
+        from datetime import datetime
+        import random
+        
+        hour = datetime.now().hour
+        if hour < 12:
+            time_of_day = "morning"
+        elif hour < 17:
+            time_of_day = "afternoon"
+        else:
+            time_of_day = "evening"
+            
+        greetings = [
+            f"Good {time_of_day} boss, Elora is standing by.",
+            "Hello boss. Systems are ready. How can I assist you?",
+            "Elora online. Standing by for your command, boss.",
+            f"Welcome back boss. What shall we do this {time_of_day}?"
+        ]
+        msg = random.choice(greetings)
         print(f"Elora: {msg}\n")
         speak_text(msg)
-        add_to_history("assistant", msg)
+        add_to_history("assistant", json.dumps({"action": "reply", "arguments": {"message": msg}}))
     except Exception as e:
         logger.error("Failed to generate voice loop startup greeting: %s", e)
         fallback = "Hello, I am Elora. Standing by."
         print(f"Elora: {fallback}\n")
         from elora.voice import speak_text
         speak_text(fallback)
-        add_to_history("assistant", fallback)
+        add_to_history("assistant", json.dumps({"action": "reply", "arguments": {"message": fallback}}))
     
     while True:
         try:

@@ -135,6 +135,30 @@ class DaemonQueryThread(QThread):
             client.close()
 
 
+class NewsFetchThread(QThread):
+    """Background thread to fetch RSS feeds without freezing the GUI."""
+    feeds_fetched = Signal(list)
+
+    def __init__(self, feeds: list):
+        super().__init__()
+        self.feeds = feeds
+
+    def run(self):
+        import feedparser
+        results = []
+        for feed_url in self.feeds:
+            try:
+                parsed = feedparser.parse(feed_url)
+                feed_title = parsed.feed.get("title", "News")
+                for entry in parsed.entries[:2]:
+                    title = entry.get("title", "No Title")
+                    link = entry.get("link", "")
+                    results.append((title, feed_title, link))
+            except Exception as e:
+                logger.error("Failed to fetch feed %s: %s", feed_url, e)
+        self.feeds_fetched.emit(results)
+
+
 class OrbWidget(QWidget):
     """Vector canvas rendering the pulsing/glowing AI Core."""
     def __init__(self, parent=None):
@@ -1238,6 +1262,10 @@ class EloraHUD(QWidget):
                             self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {args_type.get('message', '')}")
                     except Exception:
                         self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {content}")
+            
+            # Resume existing conversation immediately without showing waking up
+            self.reset_to_idle()
+            return
 
         # Check if we have the user's name stored in memory
         user_name = "boss"
@@ -1270,47 +1298,74 @@ class EloraHUD(QWidget):
         else:
             time_of_day = "evening"
 
-        self.update_state_ui("thinking", "WAKING UP...")
+        # Generate local dynamic greeting immediately
+        import random
+        greetings = [
+            f"Good {time_of_day} {user_name}, Elora standing by.",
+            f"Hello {user_name}. Systems are green and ready.",
+            f"Welcome back {user_name}. What is your command?",
+            f"System initialized. How can I assist you this {time_of_day}, {user_name}?",
+            f"Greetings {user_name}. Standing by for instructions.",
+            f"Elora online, {user_name}. What shall we work on?"
+        ]
+        local_greeting = random.choice(greetings)
+
+        # Show instantly in console
+        self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {local_greeting}")
+        self.session_history.append({"role": "assistant", "content": local_greeting})
         
-        greeting_prompt = (
-            f"Generate an extremely short, creative, and unique 1-sentence greeting welcoming the user. "
-            f"Always greet the user as 'boss' (e.g. 'Good evening boss, what do you need?', 'What's up boss?', 'Need something done today?'). "
-            f"It is currently the {time_of_day} (local time: {datetime.now().strftime('%I:%M %p')}). "
-            f"Keep the greeting under 10-15 words. Be casual, creative, and ready for action. "
-            f"Respond strictly with a reply action."
-        )
-        
-        self.query_thread = DaemonQueryThread(greeting_prompt, save_history=False)
-        self.query_thread.status_changed.connect(self.handle_status_change)
-        self.query_thread.query_finished.connect(self.handle_brain_response)
-        self.query_thread.start()
+        self.update_state_ui("speaking", "SPEAKING...")
+        QTimer.singleShot(1500, self.reset_to_idle)
+
+        # Send background tasks to daemon to update history and speak
+        import threading
+        import json
+        def play_greeting_bg():
+            try:
+                c = EloraDaemonClient()
+                c.send_cmd({"cmd": "reset_history"})
+                c.send_cmd({
+                    "cmd": "add_history",
+                    "role": "assistant",
+                    "content": json.dumps({"action": "reply", "arguments": {"message": local_greeting}})
+                })
+                c.send_cmd({"cmd": "speak", "text": local_greeting})
+            except Exception as bg_err:
+                logger.error("Failed to play startup greeting in background thread: %s", bg_err)
+
+        threading.Thread(target=play_greeting_bg, daemon=True).start()
 
     # =====================================================================
     # Telemetry RSS Loading
     # =====================================================================
     def load_news_skimmer(self):
         self.news_list.clear()
+        self.news_list.addItem("Loading news feeds...")
         try:
-            import feedparser
             from elora.config import load_config
             config = load_config()
             feeds = config.get("news", {}).get("feeds", [])
             
-            count = 1
-            for feed_url in feeds:
-                parsed = feedparser.parse(feed_url)
-                feed_title = parsed.feed.get("title", "News")
-                for entry in parsed.entries[:2]:
-                    title = entry.get("title", "No Title")
-                    link = entry.get("link", "")
-                    
-                    item_text = f"[{count}] {title} ({feed_title[:12]})"
-                    item = QListWidgetItem(item_text)
-                    item.setData(Qt.ItemDataRole.UserRole, link)
-                    self.news_list.addItem(item)
-                    count += 1
+            # Start background thread to avoid freezing the GUI
+            self.news_thread = NewsFetchThread(feeds)
+            self.news_thread.feeds_fetched.connect(self.populate_news_skimmer)
+            self.news_thread.start()
         except Exception as e:
-            logger.error("Failed to load news skimmer telemetry: %s", e)
+            logger.error("Failed to start news skimmer thread: %s", e)
+            self.news_list.clear()
+            self.news_list.addItem("Failed to load news feeds.")
+
+    def populate_news_skimmer(self, items):
+        self.news_list.clear()
+        if not items:
+            self.news_list.addItem("No news articles found.")
+            return
+            
+        for count, (title, feed_title, link) in enumerate(items, 1):
+            item_text = f"[{count}] {title} ({feed_title[:12]})"
+            item = QListWidgetItem(item_text)
+            item.setData(Qt.ItemDataRole.UserRole, link)
+            self.news_list.addItem(item)
 
     def on_news_clicked(self, item: QListWidgetItem):
         link = item.data(Qt.ItemDataRole.UserRole)

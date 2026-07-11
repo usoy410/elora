@@ -92,6 +92,18 @@ def _get_kokoro_client() -> Optional[object]:
         return None
 
 
+def preload_voice_model() -> None:
+    """
+    Preloads and caches the Kokoro-ONNX voice client in memory.
+    
+    Why: Prevents first-use latency by downloading required assets and 
+    loading the ONNX model into memory during daemon startup rather than
+    on the first voice synthesis request.
+    """
+    _get_kokoro_client()
+
+
+
 def save_audio_payload(audio_data: bytes, mime_type: str, output_path: str) -> str:
     """Saves audio data to a file, wrapping in a WAV container if it is raw PCM."""
     lower_mime = mime_type.lower()
