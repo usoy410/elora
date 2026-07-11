@@ -216,7 +216,9 @@ def handle_client(conn: socket.socket):
                             
                     elif cmd == "query_brain":
                         text = payload.get("text", "")
-                        add_to_history("user", text)
+                        save_history = payload.get("save_history", True)
+                        if save_history:
+                            add_to_history("user", text)
 
                         # If a memory focus is active, prepend it as a system context
                         # message so the LLM can reference it without injecting it into
@@ -267,7 +269,7 @@ def handle_client(conn: socket.socket):
                                     except Exception:
                                         title, url = "the article", ""
 
-                                    speak_text(f"Opening {title} in your browser now.")
+                                    speak_text(f"Opening {title} in your browser now. Tell me if you want a summary or details about it.")
                                     open_article(idx)
 
                                     # Inject context so follow-up questions ("summarize it",
@@ -275,11 +277,7 @@ def handle_client(conn: socket.socket):
                                     if url:
                                         add_to_history(
                                             "user",
-                                            f"[System context] I just opened the article titled "
-                                            f'"{title}" in the browser. Its URL is: {url}. '
-                                            "If the user asks for a summary, key points, or any "
-                                            "details about it, use web_scrape on that URL to fetch "
-                                            "the content first, then reply conversationally."
+                                            f"[System info: Opened news article titled '{title}' (URL: {url}).]"
                                         )
                                 else:
                                     speak_text("I couldn't find which article you wanted to open.")
@@ -290,17 +288,14 @@ def handle_client(conn: socket.socket):
                             if url:
                                 from urllib.parse import urlparse
                                 domain = urlparse(url).netloc or url
-                                speak_text(f"Opening {domain} in Brave.")
+                                speak_text(f"Opening {domain} in Brave. Tell me if you want a summary or details about it.")
                                 from elora.actions import open_browser_url
                                 open_browser_url(url)
 
                                 # Inject context so follow-up questions about this page work
                                 add_to_history(
                                     "user",
-                                    f"[System context] I just navigated to {url} in Brave. "
-                                    "If the user asks for a summary or details about it, "
-                                    "use web_scrape on that URL to fetch the content first, "
-                                    "then reply conversationally."
+                                    f"[System info: Navigated Brave browser to {url}.]"
                                 )
                             else:
                                 speak_text("No URL was provided.")

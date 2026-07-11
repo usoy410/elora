@@ -91,9 +91,10 @@ class DaemonQueryThread(QThread):
     status_changed = Signal(str)
     query_finished = Signal(dict)
 
-    def __init__(self, prompt: str):
+    def __init__(self, prompt: str, save_history: bool = True):
         super().__init__()
         self.prompt = prompt
+        self.save_history = save_history
 
     def run(self):
         from elora.daemon_client import EloraDaemonClient
@@ -107,7 +108,7 @@ class DaemonQueryThread(QThread):
 
         try:
             # Query the brain via Unix socket line protocol
-            payload = json.dumps({"cmd": "query_brain", "text": self.prompt}) + "\n"
+            payload = json.dumps({"cmd": "query_brain", "text": self.prompt, "save_history": self.save_history}) + "\n"
             client.sock.sendall(payload.encode("utf-8"))
 
             f = client.sock.makefile("r", encoding="utf-8")
@@ -404,7 +405,7 @@ class EloraHUD(QWidget):
         self.orb_layout.addWidget(self.orb, alignment=Qt.AlignmentFlag.AlignCenter)
         
         # State indicator Label
-        self.state_label = QLabel("[ HOLD SPACE TO TALK ]", self)
+        self.state_label = QLabel("[ HOLD ALT TO TALK ]", self)
         self.state_label.setStyleSheet("color: rgba(255, 255, 255, 0.4); font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; letter-spacing: 2px;")
         self.orb_layout.addWidget(self.state_label, alignment=Qt.AlignmentFlag.AlignCenter)
         self.left_layout.addWidget(self.orb_section)
@@ -464,7 +465,7 @@ class EloraHUD(QWidget):
 
         # Bottom section: Tip Label
 
-        self.ptt_tip = QLabel("[ Hold SPACE to Speak ]   •   [ Press ESC to Exit ]", self)
+        self.ptt_tip = QLabel("[ Hold ALT to Speak ]   •   [ Press ESC to Exit ]", self)
         self.ptt_tip.setStyleSheet("color: rgba(255, 255, 255, 0.3); font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold;")
         self.left_layout.addWidget(self.ptt_tip, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -509,7 +510,7 @@ class EloraHUD(QWidget):
         self.chat_layout = QVBoxLayout(self.page_chat)
         self.chat_layout.setContentsMargins(0, 0, 0, 0)
         self.console_output = QTextBrowser(self)
-        self.console_output.append("<span style='color: #818CF8;'>Elora:</span> Centralized HUD ready. Hold <b>Spacebar</b> to talk, edit the transcription in the text box on the left if needed, and press Enter to send.")
+        self.console_output.append("<span style='color: #818CF8;'>Elora:</span> Centralized HUD ready. Hold <b>ALT</b> to talk, edit the transcription in the text box on the left if needed, and press Enter to send.")
         self.chat_layout.addWidget(self.console_output)
         
         self.stacked_widget.addWidget(self.page_chat)
@@ -622,15 +623,75 @@ class EloraHUD(QWidget):
         # Trigger speed update label
         self.on_speed_changed(self.sld_speed.value())
 
-        # Custom AI System instructions textarea
-        lbl_instr = QLabel("SYSTEM INSTRUCTIONS", self)
-        lbl_instr.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
-        self.settings_layout.addWidget(lbl_instr)
-        self.txt_instructions = QTextEdit(self)
-        from elora.brain import DEFAULT_CUSTOM_INSTRUCTION
-        current_instructions = self.config.get("custom_instructions", DEFAULT_CUSTOM_INSTRUCTION)
-        self.txt_instructions.setPlainText(current_instructions)
-        self.settings_layout.addWidget(self.txt_instructions)
+        # AI Personality selection
+        lbl_personality = QLabel("AI PERSONALITY", self)
+        lbl_personality.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
+        self.settings_layout.addWidget(lbl_personality)
+        
+        self.cmb_personality = QComboBox(self)
+        self.cmb_personality.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.cmb_personality.addItem("Jarvis (Default)", "default")
+        self.cmb_personality.addItem("Funny", "funny")
+        self.cmb_personality.addItem("Direct", "direct")
+        self.cmb_personality.addItem("Polite", "polite")
+        self.cmb_personality.addItem("Respectful", "respectful")
+        self.cmb_personality.addItem("Other...", "other")
+        
+        # Load personality from config with backward compatibility for legacy custom_instructions
+        active_personality = self.config.get("personality")
+        if not active_personality:
+            legacy_instr = self.config.get("custom_instructions")
+            from elora.brain import DEFAULT_CUSTOM_INSTRUCTION
+            if legacy_instr and legacy_instr.strip() != DEFAULT_CUSTOM_INSTRUCTION.strip():
+                active_personality = "other"
+            else:
+                active_personality = "default"
+                
+        idx_p = self.cmb_personality.findData(active_personality)
+        if idx_p != -1:
+            self.cmb_personality.setCurrentIndex(idx_p)
+        self.settings_layout.addWidget(self.cmb_personality)
+        
+        # Custom/Other personality description field
+        self.lbl_custom_personality = QLabel("CUSTOM PERSONALITY TYPE", self)
+        self.lbl_custom_personality.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
+        self.settings_layout.addWidget(self.lbl_custom_personality)
+        
+        self.txt_custom_personality = QLineEdit(self)
+        self.txt_custom_personality.setPlaceholderText("Enter custom personality (e.g. sarcastic pirate, helpful friend)...")
+        self.txt_custom_personality.setStyleSheet("""
+            QLineEdit {
+                background-color: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 8px;
+                color: #FFFFFF;
+                font-family: 'Inter', sans-serif;
+                font-size: 12px;
+                padding: 6px 10px;
+            }
+            QLineEdit:focus {
+                border-color: rgba(129, 140, 248, 0.6);
+                background-color: rgba(255, 255, 255, 0.06);
+            }
+        """)
+        
+        # Load custom personality description with backward compatibility for legacy custom_instructions
+        current_custom = self.config.get("custom_personality")
+        if current_custom is None:
+            legacy_instr = self.config.get("custom_instructions")
+            from elora.brain import DEFAULT_CUSTOM_INSTRUCTION
+            if legacy_instr and legacy_instr.strip() != DEFAULT_CUSTOM_INSTRUCTION.strip():
+                current_custom = legacy_instr.strip()
+            else:
+                current_custom = ""
+        self.txt_custom_personality.setText(current_custom)
+        self.settings_layout.addWidget(self.txt_custom_personality)
+        
+        # Connect change event to toggle visibility
+        self.cmb_personality.currentIndexChanged.connect(self.on_personality_changed)
+        
+        # Call toggle logic once to initialize visibility of custom inputs
+        self.on_personality_changed()
 
         # Restart conversation button
         self.btn_reset_conv = QPushButton("Restart Conversation", self)
@@ -863,6 +924,12 @@ class EloraHUD(QWidget):
     def on_speed_changed(self, value: int):
         self.lbl_speed_val.setText(f"SPEED: {value/100:.1f}x")
 
+    def on_personality_changed(self):
+        """Toggles visibility of the custom personality input fields when 'other' is selected."""
+        is_other = self.cmb_personality.currentData() == "other"
+        self.lbl_custom_personality.setVisible(is_other)
+        self.txt_custom_personality.setVisible(is_other)
+
     def save_tools_config(self):
         """Saves current state of tool active checkboxes to configuration file."""
         updates = {
@@ -875,11 +942,12 @@ class EloraHUD(QWidget):
         save_config(updates)
 
     def save_settings(self):
-        """Saves active voice, STT model, and custom instructions configurations to disk."""
+        """Saves active voice, STT model, and personality configurations to disk."""
         selected_voice = self.cmb_voice.currentData()
         selected_speed = self.sld_speed.value() / 100.0
         selected_stt = self.cmb_stt_model.currentData()
-        custom_instructions = self.txt_instructions.toPlainText().strip()
+        selected_personality = self.cmb_personality.currentData()
+        custom_personality = self.txt_custom_personality.text().strip()
 
         updates = {
             "voice": {
@@ -889,7 +957,8 @@ class EloraHUD(QWidget):
             "stt": {
                 "model_name": selected_stt
             },
-            "custom_instructions": custom_instructions
+            "personality": selected_personality,
+            "custom_personality": custom_personality
         }
         
         # Save updates to ~/.config/elora/config.json
@@ -923,15 +992,9 @@ class EloraHUD(QWidget):
     def eventFilter(self, watched, event):
         # Intercept KeyPress and KeyRelease events globally in this application
         if event.type() == QEvent.Type.KeyPress:
-            if event.key() == Qt.Key.Key_Space:
-                # Ignore spacebar recording if the user is typing in a text area or line input
-                focused = QApplication.focusWidget()
-                if focused and isinstance(focused, (QTextEdit, QLineEdit)):
-                    return False  # Let the text box handle it
-                
+            if event.key() in (Qt.Key.Key_Alt, Qt.Key.Key_AltGr):
                 if not event.isAutoRepeat():
-                    # If user re-presses space bar during the 450ms tail delay, cancel the stop timer.
-                    # Why: Provides a seamless continuation of recording if they quickly tap/hold again.
+                    # If user re-presses Alt during the 450ms tail delay, cancel the stop timer.
                     if self.ptt_release_timer.isActive():
                         self.ptt_release_timer.stop()
                     else:
@@ -945,14 +1008,9 @@ class EloraHUD(QWidget):
                 return True
                 
         elif event.type() == QEvent.Type.KeyRelease:
-            if event.key() == Qt.Key.Key_Space:
-                focused = QApplication.focusWidget()
-                if focused and isinstance(focused, (QTextEdit, QLineEdit)):
-                    return False
-                
+            if event.key() in (Qt.Key.Key_Alt, Qt.Key.Key_AltGr):
                 if not event.isAutoRepeat():
                     # Delay calling stop_voice_recording by 450ms to prevent clipping the tail end of speech.
-                    # Why: Human release latency and audio card buffers mean the last word is still being captured.
                     self.ptt_release_timer.start(450)
                 return True
                 
@@ -1124,8 +1182,6 @@ class EloraHUD(QWidget):
             QTimer.singleShot(1000, self.reset_to_idle)
 
         elif action == "reply":
-            # Catch memory_store / memory_recall / memory_forget confirmations
-            # that arrive as standard reply actions
             msg = args.get("message", "")
             self.session_history.append({"role": "assistant", "content": msg})
             if len(self.session_history) > 20:
@@ -1135,7 +1191,7 @@ class EloraHUD(QWidget):
             QTimer.singleShot(1500, self.reset_to_idle)
 
     def reset_to_idle(self):
-        self.update_state_ui("idle", "[ HOLD SPACE TO TALK ]")
+        self.update_state_ui("idle", "[ HOLD ALT TO TALK ]")
 
     def trigger_startup_greeting(self):
         # Sync with daemon conversation history if it exists
@@ -1162,26 +1218,58 @@ class EloraHUD(QWidget):
                 elif role == "assistant":
                     try:
                         payload = json.loads(content)
-                        action = payload.get("action")
-                        args = payload.get("arguments", {})
-                        if action == "reply":
-                            self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {args.get('message', '')}")
+                        action_type = payload.get("action")
+                        args_type = payload.get("arguments", {})
+                        if action_type == "reply":
+                            self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {args_type.get('message', '')}")
                     except Exception:
                         self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {content}")
-            
-            self.reset_to_idle()
-            return
 
-        # No history found, trigger startup waking sequence
+        # Check if we have the user's name stored in memory
+        user_name = "partner" # default warm companion term
+        try:
+            from elora.memory import is_memory_available, search_memory
+            avail, _ = is_memory_available()
+            if avail:
+                results = search_memory("my name is", top_k=1, threshold=0.5)
+                if not results:
+                    results = search_memory("call me", top_k=1, threshold=0.5)
+                if results:
+                    text = results[0]["text"]
+                    text_lower = text.lower()
+                    for pattern in ("name is", "call me"):
+                        if pattern in text_lower:
+                            extracted = text[text_lower.index(pattern) + len(pattern):].strip()
+                            extracted = extracted.rstrip(".").rstrip("!").strip()
+                            if extracted:
+                                user_name = extracted
+                                break
+        except Exception as e:
+            logger.error("Failed to recall user name from memory: %s", e)
+
+        from datetime import datetime
+        hour = datetime.now().hour
+        if hour < 12:
+            time_of_day = "morning"
+        elif hour < 17:
+            time_of_day = "afternoon"
+        else:
+            time_of_day = "evening"
+
         self.update_state_ui("thinking", "WAKING UP...")
         
+        # If there's history, prompt for a welcome back. Otherwise, a startup greeting.
+        welcome_type = "welcoming the user back" if history else "welcoming the user for the first time"
         greeting_prompt = (
-            "Generate a brief, warm, 1-sentence greeting welcoming the user. "
-            "Introduce yourself as Elora, standing by. Tell them to hold space to talk. "
-            "Respond strictly with a reply action."
+            f"Generate a brief, warm, 1-sentence greeting {welcome_type}. "
+            f"The user's name is '{user_name}' (or greet them as 'partner' or another appropriate warm companion term). "
+            f"It is currently the {time_of_day} (local time: {datetime.now().strftime('%I:%M %p')}). "
+            f"Speak in a warm, helpful Jarvis-like style (companion/partner, not robotic, no bot disclaimers). "
+            f"Let them know you are standing by. "
+            f"Respond strictly with a reply action."
         )
         
-        self.query_thread = DaemonQueryThread(greeting_prompt)
+        self.query_thread = DaemonQueryThread(greeting_prompt, save_history=False)
         self.query_thread.status_changed.connect(self.handle_status_change)
         self.query_thread.query_finished.connect(self.handle_brain_response)
         self.query_thread.start()

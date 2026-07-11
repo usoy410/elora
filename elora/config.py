@@ -40,7 +40,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     },
     "browser": {
         "default_command": "xdg-open"
-    }
+    },
+    "personality": "default",
+    "custom_personality": ""
 }
 
 

@@ -157,6 +157,20 @@ def open_browser_url(url: str) -> bool:
     
     Why: Handles standard navigation requests.
     """
+    # Expand shell variables and shortcuts (e.g. $(pwd), $PWD, ~, $HOME)
+    for term in ("$(pwd)", "$(PWD)", "$pwd", "$PWD"):
+        if term in url:
+            url = url.replace(term, os.getcwd())
+            
+    for term in ("$home", "$HOME"):
+        if term in url:
+            url = url.replace(term, os.path.expanduser("~"))
+            
+    if "file://~" in url:
+        url = url.replace("file://~", "file://" + os.path.expanduser("~"))
+    elif url.startswith("~"):
+        url = os.path.expanduser(url)
+
     from elora.config import load_config
     config = load_config()
     browser_cmd = config.get("browser", {}).get("default_command", "xdg-open")
