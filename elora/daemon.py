@@ -362,13 +362,22 @@ def run_daemon():
     os.chmod(SOCKET_PATH, 0o777)
     
     logger.info("Elora Daemon active on Unix socket: %s", SOCKET_PATH)
-    logger.info("Pre-warming models...")
+    logger.info("Pre-warming models and browser...")
     try:
         _get_stt_model()
         _get_kokoro_client()
         logger.info("Vosk and Kokoro models successfully loaded in background.")
     except Exception as e:
-        logger.error("Failed to prewarm models: %s", e)
+        logger.error("Failed to prewarm ML models: %s", e)
+        
+    try:
+        from elora.browser_control import launch_brave_with_debugging
+        if launch_brave_with_debugging():
+            logger.info("Brave browser pre-warmed successfully.")
+        else:
+            logger.warning("Brave browser pre-warming failed.")
+    except Exception as e:
+        logger.error("Failed to prewarm Brave: %s", e)
 
     try:
         while True:

@@ -26,10 +26,12 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
     skills_cfg = config.get("skills", {"web_search": True, "web_scrape": True, "command_run": True})
     
     allowed_actions = ["antigravity", "browser", "news_fetch", "reply",
-                        "memory_store", "memory_recall", "memory_focus", "memory_forget"]
+                        "memory_store", "memory_recall", "memory_focus", "memory_forget",
+                        "browser_browse", "browser_click", "browser_type", "browser_get_elements",
+                        "desktop_input", "system_control"]
     guidelines = [
         "4. Use 'antigravity' for coding, workspace automation, or heavy calculations.",
-        "5. Use 'browser' to open a webpage on the user's desktop browser (e.g. \"open github.com\").",
+        "5. Use 'browser' to open a webpage on the user's desktop browser (e.g. \"open github.com\") using default xdg-open.",
         "6. Use 'news_fetch' with mode 'skim' when asked for tech news or updates.",
         "7. Use 'news_fetch' with mode 'deep_dive' and the 'index' number when asked to open a specific news article from a previous list.",
         "8. Use 'reply' to talk to the user, answer questions with gathered data, or request clarification.",
@@ -38,6 +40,12 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
         "11. Use 'memory_focus' when the user says 'focus on [topic]', 'let's talk about [topic]', or 'switch to [topic]' — set 'query' to the topic.",
         "12. Use 'memory_forget' when the user says 'forget' or 'delete from memory' — set 'query' to what should be erased.",
         "13. Use 'memory_recall' when the user says 'what have you remembered' or 'list your memories' — set query to 'all'.",
+        "14. Use 'browser_browse' to navigate the remote-debugged Brave browser to a URL (e.g. 'google.com').",
+        "15. Use 'browser_click' to click an interactive element on the active Brave page by CSS selector or descriptive text label (e.g. 'Sign in').",
+        "16. Use 'browser_type' to fill text in an input field on the active Brave page (e.g. selector_or_text='search', text='weather').",
+        "17. Use 'browser_get_elements' to retrieve a list of all visible/interactive page elements to understand the current page layout.",
+        "18. Use 'desktop_input' to control mouse cursor/keyboard universally on the system. Types are 'move' (requires x, y), 'click' (requires x, y), 'type' (requires text), or 'shortcut' (requires text, e.g. 'alt+tab').",
+        "19. Use 'system_control' to adjust OS controls. Types are 'volume' (requires level), 'brightness' (requires level), 'window' (requires param: 'minimize', 'maximize', 'close'), or 'launch' (requires param: app name, e.g., 'code', 'chrome', 'calculator')."
     ]
     
     # Prepend dynamic options if enabled
@@ -61,15 +69,22 @@ You must respond strictly with a valid JSON object matching this schema:
 {{
   "action": {actions_str},
   "arguments": {{
-    "prompt":  "For 'antigravity', the task prompt to pass to the CLI agent.",
-    "url":     "For 'browser' or 'web_scrape', the URL to open or fetch.",
-    "query":   "For 'web_search', 'memory_recall', 'memory_focus', 'memory_forget' — the search query or topic.",
-    "command": "For 'command_run', the local shell command to execute.",
-    "mode":    "For 'news_fetch', either 'skim' (to summarize news) or 'deep_dive' (to open an article).",
-    "index":   "For 'news_fetch' with mode='deep_dive', the 1-based integer index of the article to open.",
-    "text":    "For 'memory_store', the exact fact or statement to remember.",
-    "topic":   "For 'memory_store', a short lowercase topic label (e.g. 'linux', 'kubernetes', 'projects').",
-    "message": "For 'reply', the direct chat response to the user."
+    "prompt":            "For 'antigravity', the task prompt to pass to the CLI agent.",
+    "url":               "For 'browser', 'browser_browse', or 'web_scrape', the URL to open or fetch.",
+    "query":             "For 'web_search', 'memory_recall', 'memory_focus', 'memory_forget' — the search query or topic.",
+    "command":           "For 'command_run', the local shell command to execute.",
+    "mode":              "For 'news_fetch', either 'skim' (to summarize news) or 'deep_dive' (to open an article).",
+    "index":             "For 'news_fetch' with mode='deep_dive', the 1-based integer index of the article to open.",
+    "text":              "For 'memory_store' (fact statement), 'browser_type' (text to enter), or 'desktop_input' (text/shortcut to type).",
+    "topic":             "For 'memory_store', a short lowercase topic label (e.g. 'linux', 'projects').",
+    "message":           "For 'reply', the direct chat response to the user.",
+    "selector_or_text":  "For 'browser_click' or 'browser_type', the CSS selector or the text label of the target element.",
+    "input_type":        "For 'desktop_input', either 'move', 'click', 'type', or 'shortcut'.",
+    "x":                 "For 'desktop_input' (integer X coordinate).",
+    "y":                 "For 'desktop_input' (integer Y coordinate).",
+    "control_type":      "For 'system_control', either 'volume', 'brightness', 'window', or 'launch'.",
+    "level":             "For 'system_control' (integer 0-100 for volume or brightness).",
+    "param":             "For 'system_control' window actions ('minimize', 'maximize', 'close') or app names to launch ('code', 'calculator', etc.)"
   }}
 }}
 

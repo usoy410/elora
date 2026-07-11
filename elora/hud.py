@@ -357,13 +357,19 @@ class EloraHUD(QWidget):
         self.btn_settings.setIcon(QIcon.fromTheme("preferences-system"))
         self.btn_settings.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         
+        self.btn_browser = QPushButton("Browser", self)
+        self.btn_browser.setIcon(QIcon.fromTheme("web-browser"))
+        self.btn_browser.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        
         self.btn_tools.clicked.connect(lambda: self.toggle_sidebar(1))
         self.btn_chat.clicked.connect(lambda: self.toggle_sidebar(0))
         self.btn_settings.clicked.connect(lambda: self.toggle_sidebar(2))
+        self.btn_browser.clicked.connect(lambda: self.toggle_sidebar(3))
 
         self.top_bar_layout.addWidget(self.btn_tools)
         self.top_bar_layout.addWidget(self.btn_chat)
         self.top_bar_layout.addWidget(self.btn_settings)
+        self.top_bar_layout.addWidget(self.btn_browser)
 
         self.left_layout.addWidget(self.top_bar)
 
@@ -592,6 +598,60 @@ class EloraHUD(QWidget):
         self.settings_layout.addStretch()
         self.stacked_widget.addWidget(self.page_settings)
 
+        # ---------------------------------------------------------------------
+        # Tab Page 3: Browser Live Preview & Automation Abort
+        # ---------------------------------------------------------------------
+        self.page_browser = QWidget(self)
+        self.browser_layout = QVBoxLayout(self.page_browser)
+        self.browser_layout.setContentsMargins(5, 5, 5, 5)
+        self.browser_layout.setSpacing(10)
+        
+        lbl_browser_title = QLabel("BRAVE AUTOMATION PREVIEW", self)
+        lbl_browser_title.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
+        self.browser_layout.addWidget(lbl_browser_title)
+        
+        self.lbl_screenshot = QLabel(self)
+        self.lbl_screenshot.setFixedSize(340, 240)
+        self.lbl_screenshot.setStyleSheet("background-color: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;")
+        self.lbl_screenshot.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.browser_layout.addWidget(self.lbl_screenshot)
+        
+        self.lbl_browser_status = QLabel("CDP Connection: Active", self)
+        self.lbl_browser_status.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.6);")
+        self.browser_layout.addWidget(self.lbl_browser_status)
+        
+        self.btn_refresh_screenshot = QPushButton("Refresh View", self)
+        self.btn_refresh_screenshot.setIcon(QIcon.fromTheme("view-refresh"))
+        self.btn_refresh_screenshot.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_refresh_screenshot.clicked.connect(self.update_browser_screenshot)
+        self.browser_layout.addWidget(self.btn_refresh_screenshot)
+        
+        self.btn_abort_automation = QPushButton("ABORT AUTOMATION (Ctrl+Alt+C)", self)
+        self.btn_abort_automation.setIcon(QIcon.fromTheme("process-stop"))
+        self.btn_abort_automation.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_abort_automation.setStyleSheet("background-color: rgba(239, 68, 68, 0.35); border-color: rgba(239, 68, 68, 0.6); color: #EF4444;")
+        
+        def trigger_abort():
+            from elora.os_control import on_abort_activated
+            on_abort_activated()
+            self.console_output.append("<br><span style='color: #EF4444;'>System: Automation aborted by user request.</span>")
+            
+        self.btn_abort_automation.clicked.connect(trigger_abort)
+        self.browser_layout.addWidget(self.btn_abort_automation)
+        
+        lbl_abort_desc = QLabel("Pressing ABORT or the 'Ctrl+Alt+C' hotkey immediately terminates active mouse and keyboard automation sequences.", self)
+        lbl_abort_desc.setStyleSheet("color: rgba(255, 255, 255, 0.4); font-size: 10px;")
+        lbl_abort_desc.setWordWrap(True)
+        self.browser_layout.addWidget(lbl_abort_desc)
+        
+        self.browser_layout.addStretch()
+        self.stacked_widget.addWidget(self.page_browser)
+        
+        # Start a refresh timer to update screenshot every 2 seconds
+        self.browser_refresh_timer = QTimer(self)
+        self.browser_refresh_timer.timeout.connect(self.update_browser_screenshot)
+        self.browser_refresh_timer.start(2000)
+
         self.sidebar_layout.addWidget(self.stacked_widget)
         self.card_layout.addWidget(self.sidebar_widget)
 
@@ -623,6 +683,20 @@ class EloraHUD(QWidget):
         # Install global application event filter to intercept keyboard presses
         QApplication.instance().installEventFilter(self)
 
+    def update_browser_screenshot(self):
+        """Loads /tmp/elora_browser.png and displays it scaled inside the HUD browser tab."""
+        from PySide6.QtGui import QPixmap
+        import os
+        screenshot_path = "/tmp/elora_browser.png"
+        if os.path.exists(screenshot_path):
+            pixmap = QPixmap(screenshot_path)
+            scaled = pixmap.scaled(self.lbl_screenshot.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.lbl_screenshot.setPixmap(scaled)
+            self.lbl_browser_status.setText("CDP Connection: Active (Screenshot updated)")
+        else:
+            self.lbl_screenshot.setText("No screenshot captured yet.\nElora will capture one when navigating.")
+            self.lbl_browser_status.setText("CDP Connection: Standing by")
+
     def center_on_screen(self):
         screen = QApplication.primaryScreen().geometry()
         size = self.geometry()
@@ -634,7 +708,7 @@ class EloraHUD(QWidget):
     def toggle_sidebar(self, tab_index: int):
         """Toggles the visibility of the action sidebar."""
         # Update title header text
-        titles = ["Conversation", "Tools", "Settings"]
+        titles = ["Conversation", "Tools", "Settings", "Browser Preview"]
         self.sidebar_title.setText(titles[tab_index])
         
         if self.active_sidebar_tab == tab_index:

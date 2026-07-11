@@ -8,6 +8,9 @@ from typing import Dict, Any, List, Callable, Optional
 
 from elora.brain import query_elora
 from elora.skills import search_duckduckgo, scrape_webpage, run_local_command
+from elora.browser_control import execute_browser_action
+from elora.os_control import move_mouse_smoothly, click_mouse_at, type_keyboard_text
+from elora.system_skills import set_system_volume, set_system_brightness, perform_window_action, launch_application
 from elora.memory import (
     store_memory,
     search_memory,
@@ -126,6 +129,89 @@ def run_agent_loop(
             # Feed output back
             loop_history.append({"role": "user", "content": f"System Tool Output (command_run for '{cmd}'):\n{command_result}"})
             current_prompt = f"Analyze the command output of '{cmd}' and determine your next action."
+            
+        elif action == "browser_browse":
+            url = args.get("url", "")
+            status_msg = f"Browsing Brave to URL: {url}"
+            if status_callback:
+                status_callback(status_msg)
+            res = execute_browser_action("browse", url=url)
+            loop_history.append({"role": "user", "content": f"System Tool Output (browser_browse of {url}): {res}"})
+            current_prompt = f"Analyze navigation outcome for {url} and determine next action."
+
+        elif action == "browser_click":
+            sel = args.get("selector_or_text", "")
+            status_msg = f"Clicking element matching '{sel}' on Brave page"
+            if status_callback:
+                status_callback(status_msg)
+            res = execute_browser_action("click", selector_or_text=sel)
+            loop_history.append({"role": "user", "content": f"System Tool Output (browser_click on '{sel}'): {res}"})
+            current_prompt = f"Analyze click outcome for '{sel}' and determine next action."
+
+        elif action == "browser_type":
+            sel = args.get("selector_or_text", "")
+            val = args.get("text", "")
+            status_msg = f"Typing '{val}' into input '{sel}' on Brave page"
+            if status_callback:
+                status_callback(status_msg)
+            res = execute_browser_action("type", selector_or_text=sel, text=val)
+            loop_history.append({"role": "user", "content": f"System Tool Output (browser_type '{val}' into '{sel}'): {res}"})
+            current_prompt = f"Analyze input typing outcome for '{sel}' and determine next action."
+
+        elif action == "browser_get_elements":
+            status_msg = "Extracting visible elements from Brave page"
+            if status_callback:
+                status_callback(status_msg)
+            res = execute_browser_action("get_elements")
+            loop_history.append({"role": "user", "content": f"System Tool Output (browser_get_elements): {res}"})
+            current_prompt = "Identify target elements from page structure and determine next action."
+
+        elif action == "desktop_input":
+            itype = args.get("input_type", "")
+            x_coord = args.get("x", 0)
+            y_coord = args.get("y", 0)
+            text_val = args.get("text", "")
+            
+            status_msg = f"Simulating OS input: {itype}"
+            if status_callback:
+                status_callback(status_msg)
+                
+            res = ""
+            if itype == "move":
+                res = move_mouse_smoothly(int(x_coord), int(y_coord))
+            elif itype == "click":
+                res = click_mouse_at(int(x_coord), int(y_coord))
+            elif itype in ("type", "shortcut"):
+                res = type_keyboard_text(text_val)
+            else:
+                res = f"Error: Unknown input type '{itype}'"
+                
+            loop_history.append({"role": "user", "content": f"System Tool Output (desktop_input: {itype}): {res}"})
+            current_prompt = f"Analyze desktop input outcome and determine next action."
+
+        elif action == "system_control":
+            ctype = args.get("control_type", "")
+            lvl = args.get("level", 0)
+            param_val = args.get("param", "")
+            
+            status_msg = f"Adjusting system control: {ctype}"
+            if status_callback:
+                status_callback(status_msg)
+                
+            res = ""
+            if ctype == "volume":
+                res = set_system_volume(int(lvl))
+            elif ctype == "brightness":
+                res = set_system_brightness(int(lvl))
+            elif ctype == "window":
+                res = perform_window_action(param_val)
+            elif ctype == "launch":
+                res = launch_application(param_val)
+            else:
+                res = f"Error: Unknown control type '{ctype}'"
+                
+            loop_history.append({"role": "user", "content": f"System Tool Output (system_control: {ctype}): {res}"})
+            current_prompt = f"Analyze system control adjustment outcome and determine next action."
             
         else:
             logger.warning("Agent encountered unknown action: %s", action)
