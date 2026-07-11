@@ -27,6 +27,21 @@ class EloraDaemonClient:
         try:
             self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self.sock.connect(SOCKET_PATH)
+            
+            # Sync key graphical session environment variables from client to daemon
+            env_to_sync = {
+                k: v for k, v in os.environ.items()
+                if k in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS")
+            }
+            if env_to_sync:
+                try:
+                    payload = json.dumps({"cmd": "update_env", "env": env_to_sync}) + "\n"
+                    self.sock.sendall(payload.encode("utf-8"))
+                    # Consume the response line
+                    f = self.sock.makefile("r", encoding="utf-8")
+                    f.readline()
+                except Exception as e:
+                    logger.warning("Failed to sync environment variables to daemon: %s", e)
             return True
         except Exception as e:
             logger.error("Failed to connect to daemon socket: %s", e)

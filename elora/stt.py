@@ -1,130 +1,57 @@
 """
-Elora Speech-to-Text (STT) Engine.
-Integrates Vosk for local, lightweight voice recognition.
-Pipes audio directly from arecord into Vosk for zero-dependency capture.
+Elora Speech-to-Text (STT) Recorder.
+Deprecates local Vosk offline model and replaces it with raw PCM recording
+and energy-based silence detection. Saves captured audio to a local WAV file
+to be passed directly to the Gemini API.
 """
 
 import os
 import sys
 import time
 import logging
-import urllib.request
-import zipfile
 import subprocess
-import json
+import wave
+import math
+import struct
+from typing import Optional
 
 logger = logging.getLogger("elora.stt")
 
-MODELS_DIR = os.path.expanduser("~/.config/elora/models")
-
-# Cached Vosk Model instance and its loaded name
-_stt_model = None
-_loaded_model_name = None
+USER_VOICE_PATH = "/tmp/elora_user_voice.wav"
+_CHUNK_BYTES = 4000  # 125ms of 16kHz / 16-bit mono PCM
 
 
-
-def _download_progress(count: int, block_size: int, total_size: int) -> None:
-    """Displays STT model download progress."""
-    percent = min(100, int(count * block_size * 100 / total_size))
-    sys.stdout.write(f"\rElora: Downloading Speech-to-Text model... {percent}%")
-    sys.stdout.flush()
-
-
-def download_stt_model() -> str:
-    """
-    Verifies and downloads the selected Vosk speech model if not present.
-    
-    Why: Keeps STT installation automated, local, and configurable.
-    """
-    os.makedirs(MODELS_DIR, exist_ok=True)
-    
-    from elora.config import load_config
-    config = load_config()
-    stt_cfg = config.get("stt", {})
-    # Default to the highly accurate desktop lgraph model rather than the basic small model
-    model_name = stt_cfg.get("model_name", "vosk-model-en-us-0.22-lgraph")
-    
-    model_dir = os.path.join(MODELS_DIR, model_name)
-    zip_path = os.path.join(MODELS_DIR, f"{model_name}.zip")
-    model_url = f"https://alphacephei.com/vosk/models/{model_name}.zip"
-    
-    if not os.path.exists(model_dir):
-        if not os.path.exists(zip_path):
-            print(f"\nElora: Speech recognition model '{model_name}' missing. Downloading...")
-            try:
-                urllib.request.urlretrieve(model_url, zip_path, _download_progress)
-                print("\nElora: Download complete. Extracting model weights...")
-            except Exception as e:
-                logger.error("Failed to download Vosk model: %s", e)
-                if os.path.exists(zip_path):
-                    os.remove(zip_path)
-                raise e
-        
-        # Unzip the weights archive
-        try:
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(MODELS_DIR)
-            print(f"Elora: Voice recognition model '{model_name}' successfully extracted.")
-        except Exception as e:
-            logger.error("Failed to extract Vosk model: %s", e)
-            raise e
-        finally:
-            # Clean up the zip file to save disk space
-            if os.path.exists(zip_path):
-                os.remove(zip_path)
-                
-    return model_dir
-
-
-def _get_stt_model():
-    """
-    Lazy loaded singleton pattern for the Vosk Model client.
-    
-    Why: Keeps memory overhead low by delay-loading model weights until needed,
-    and supports dynamic reloading if user updates settings.
-    """
-    global _stt_model, _loaded_model_name
-    from elora.config import load_config
-    config = load_config()
-    stt_cfg = config.get("stt", {})
-    model_name = stt_cfg.get("model_name", "vosk-model-en-us-0.22-lgraph")
-
-    if _stt_model is None or _loaded_model_name != model_name:
-        model_path = download_stt_model()
-        from vosk import Model
-        logger.info("Loading Vosk Model %s from %s", model_name, model_path)
-        _stt_model = Model(model_path)
-        _loaded_model_name = model_name
-    return _stt_model
-
-
-def listen_voice() -> str:
-    """
-    Captures audio from the default input using ``arecord`` and transcribes it via Vosk.
-    Returns when the speaker finishes (silence auto-detected) or Ctrl-C is pressed.
-
-    Why: Bypasses C audio recording libraries, leveraging the native OS capture tool.
-    Optimisation: 250ms chunks instead of 125ms halve the Python loop iterations;
-    a 1.8-second silence timeout means the call returns quickly after the user stops speaking.
-    """
-    # Silence duration (seconds) with committed text before auto-returning
-    _SILENCE_TIMEOUT_SEC = 1.8
-    # 125ms of 16kHz / 16-bit / mono audio
-    # Why: Reduces chunk latency from 250ms to 125ms for faster, more responsive updates.
-    _CHUNK_BYTES = 4000
-
+def calculate_rms(audio_data: bytes) -> float:
+    """Calculates Root-Mean-Square (RMS) amplitude of raw 16-bit mono PCM audio data."""
+    count = len(audio_data) // 2
+    if count == 0:
+        return 0.0
+    # Unpack little-endian signed 16-bit shorts
+    format_str = f"<{count}h"
     try:
-        model = _get_stt_model()
+        shorts = struct.unpack(format_str, audio_data)
+        sum_squares = sum(s * s for s in shorts)
+        return math.sqrt(sum_squares / count)
     except Exception as e:
-        logger.error("Failed to load STT model: %s", e)
-        print("\nElora: Voice input model failed to load.")
-        return ""
+        logger.debug("RMS calculation error: %s", e)
+        return 0.0
 
-    from vosk import KaldiRecognizer
-    rec = KaldiRecognizer(model, 16000)
 
-    # Spawn arecord: 16kHz, 16-bit signed little-endian, mono, raw headerless output
-    # Why: Pass -B 100000 (100ms) to tell ALSA to use a smaller capture buffer, reducing latency.
+def listen_voice(output_path: str = USER_VOICE_PATH) -> str:
+    """
+    Captures audio from the default input using `arecord`.
+    Detects silence using energy-based RMS thresholding.
+    Saves the captured PCM stream to a WAV file.
+    
+    Returns the file path of the saved WAV file, or empty string on cancel/error.
+    """
+    # Silence detection settings
+    # RMS threshold: ambient is usually < 150; speech is > 1000. 400 is a safe threshold.
+    SILENCE_THRESHOLD = 400.0
+    SILENCE_TIMEOUT_SEC = 1.8
+    MIN_RECORD_DURATION_SEC = 0.5
+
+    # arecord: 16kHz, 16-bit S16_LE, mono, raw headerless PCM, low latency buffer
     cmd = [
         "arecord", "-r", "16000", "-f", "S16_LE", "-c", "1", "-t", "raw", "-q",
         "-B", "100000"
@@ -139,41 +66,67 @@ def listen_voice() -> str:
 
     print("\nElora: Listening... (Speak now)")
 
-    try:
-        committed_texts = []
-        last_commit_time = time.monotonic()
+    pcm_frames = []
+    start_time = time.monotonic()
+    last_sound_time = time.monotonic()
+    speech_detected = False
 
+    try:
         while True:
-            # Read 250ms worth of raw PCM per iteration
+            # Read 125ms worth of raw PCM per iteration
             data = process.stdout.read(_CHUNK_BYTES)
             if not data:
                 break
 
-            if rec.AcceptWaveform(data):
-                res = json.loads(rec.Result())
-                text = res.get("text", "").strip()
-                if text:
-                    committed_texts.append(text)
-                    last_commit_time = time.monotonic()
+            pcm_frames.append(data)
+            current_time = time.monotonic()
+            rms = calculate_rms(data)
 
-            # Auto-stop after silence threshold once at least one phrase is captured
-            if committed_texts and time.monotonic() - last_commit_time > _SILENCE_TIMEOUT_SEC:
-                break
+            # Detect if user started speaking
+            if rms > SILENCE_THRESHOLD:
+                if not speech_detected:
+                    logger.debug("Speech threshold crossed. RMS: %.2f", rms)
+                speech_detected = True
+                last_sound_time = current_time
 
-        # Flush any remaining partial
-        res = json.loads(rec.FinalResult())
-        final_segment = res.get("text", "").strip()
-        return " ".join(committed_texts + ([final_segment] if final_segment else [])).strip()
+            # Silence check: if speech was detected, auto-stop after SILENCE_TIMEOUT_SEC of silence
+            if speech_detected:
+                if current_time - last_sound_time > SILENCE_TIMEOUT_SEC:
+                    logger.debug("Silence timeout reached, finalising audio file.")
+                    break
+            else:
+                # If no speech is detected at all, allow maximum of 5 seconds before giving up
+                if current_time - start_time > 5.0:
+                    logger.debug("No speech detected. Exiting loop.")
+                    return ""
 
     except KeyboardInterrupt:
         print("\nElora: Listening cancelled.")
         return ""
     except Exception as e:
-        logger.error("Error in speech recognizer: %s", e)
+        logger.error("Error in audio recording loop: %s", e)
         return ""
     finally:
         process.terminate()
         try:
-            process.wait(timeout=2)
+            process.wait(timeout=1)
         except Exception:
             pass
+
+    # Save to a standard WAV file if we captured frames
+    duration = time.monotonic() - start_time
+    if pcm_frames and duration >= MIN_RECORD_DURATION_SEC:
+        try:
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            with wave.open(output_path, "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)  # 16-bit
+                wav_file.setframerate(16000)
+                wav_file.writeframes(b"".join(pcm_frames))
+            logger.info("Saved raw audio recording to %s (duration: %.2fs)", output_path, duration)
+            return output_path
+        except Exception as e:
+            logger.error("Failed to write WAV file: %s", e)
+            return ""
+    
+    return ""

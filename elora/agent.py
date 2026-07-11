@@ -46,6 +46,13 @@ def run_agent_loop(
         step_count += 1
         logger.info("Agent Loop Turn %d/%d", step_count, max_steps)
         
+        # Capture a fresh screenshot of the desktop/active window so the model has real-time visual context
+        try:
+            from elora.os_control import capture_desktop_screenshot
+            capture_desktop_screenshot()
+        except Exception as e:
+            logger.debug("Failed to capture screenshot: %s", e)
+
         # Query the Ollama brain
         result = query_elora(current_prompt, history=loop_history)
         action = result.get("action")

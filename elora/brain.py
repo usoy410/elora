@@ -1,29 +1,31 @@
 """
 Elora's AI reasoning engine (brain).
-Interactions with the local/cloud Ollama client, enforcing strict JSON action structures.
+Interactions with the Gemini API, enforcing strict JSON action structures.
 """
 
+import os
 import json
 import logging
 from typing import Dict, Any, List
-import ollama
+from google import genai
+from google.genai import types
 from elora.config import load_config
 
 logger = logging.getLogger("elora.brain")
 
 DEFAULT_CUSTOM_INSTRUCTION = (
-    "You are Elora, an intelligent OS orchestrator and a warm, supportive personal companion (similar to Jarvis). "
-    "Speak conversationally as a helpful partner/companion rather than a generic robotic bot. "
-    "If the user shares personal details (like their name), use 'memory_store' to save it. "
-    "If the user says goodbye, respond with a warm, caring companion sign-off and let them know you are standing by."
+    "You are Elora, an intelligent OS orchestrator and a highly efficient, creative companion (like Jarvis). "
+    "Always refer to the user as 'boss'. "
+    "Keep your conversational responses extremely short, punchy, and direct. "
+    "Prioritize task action and tool execution over verbose chatty explanations (less talk, more execution)."
 )
 
 PERSONALITIES = {
     "default": (
-        "You are Elora, an intelligent OS orchestrator and a warm, supportive personal companion (similar to Jarvis). "
-        "Speak conversationally as a helpful partner/companion rather than a generic robotic bot. "
-        "If the user shares personal details (like their name), use 'memory_store' to save it. "
-        "If the user says goodbye, respond with a warm, caring companion sign-off and let them know you are standing by."
+        "You are Elora, an intelligent OS orchestrator and a highly efficient, creative companion (like Jarvis). "
+        "Always refer to the user as 'boss'. "
+        "Keep your conversational responses extremely short, punchy, and direct. "
+        "Prioritize task action and tool execution over verbose chatty explanations (less talk, more execution)."
     ),
     "funny": (
         "You are Elora, an intelligent OS orchestrator and a witty, funny, and playful companion. "
@@ -57,7 +59,6 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
     Builds the system instruction dynamically, tailoring active guidelines and
     the JSON schema to the user's enabled skills.
     """
-    # Determine the system prompt based on user's selected personality
     personality = config.get("personality", "default")
     if personality == "other":
         custom_desc = config.get("custom_personality", "helpful")
@@ -66,7 +67,6 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
             "Speak and act in accordance with this personality in all of your responses, while still successfully executing tasks."
         )
     else:
-        # Fallback to custom_instructions for backward compatibility with older configurations
         if "personality" not in config and "custom_instructions" in config:
             custom_prompt = config["custom_instructions"]
         else:
@@ -96,7 +96,6 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
         "19. Use 'system_control' to adjust OS controls. Types are 'volume' (requires level), 'brightness' (requires level), 'window' (requires param: 'minimize', 'maximize', 'close'), or 'launch' (requires param: app name, e.g., 'code', 'chrome', 'calculator')."
     ]
     
-    # Prepend dynamic options if enabled
     if skills_cfg.get("web_search", True):
         allowed_actions.append("web_search")
         guidelines.insert(0, "1. Use 'web_search' to search the web for answers, docs, or status if you don't know the answer.")
@@ -107,99 +106,188 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
         allowed_actions.append("command_run")
         guidelines.insert(2, "3. Use 'command_run' to execute local shell commands (e.g., copying/moving/deleting files, creating directories, running scripts, package commands, or system queries) to autonomously perform actions on behalf of the user.")
         
-    actions_str = " | ".join(f'"{a}"' for a in allowed_actions)
     guidelines_str = "\n".join(guidelines)
     
     return f"""{custom_prompt}
-
-You must respond strictly with a valid JSON object matching this schema:
-
-{{
-  "action": {actions_str},
-  "arguments": {{
-    "prompt":            "For 'antigravity', the task prompt to pass to the CLI agent.",
-    "url":               "For 'browser', 'browser_browse', or 'web_scrape', the URL to open or fetch.",
-    "query":             "For 'web_search', 'memory_recall', 'memory_focus', 'memory_forget' — the search query or topic.",
-    "command":           "For 'command_run', the local shell command to execute.",
-    "mode":              "For 'news_fetch', either 'skim' (to summarize news) or 'deep_dive' (to open an article).",
-    "index":             "For 'news_fetch' with mode='deep_dive', the 1-based integer index of the article to open.",
-    "text":              "For 'memory_store' (fact statement), 'browser_type' (text to enter), or 'desktop_input' (text/shortcut to type).",
-    "topic":             "For 'memory_store', a short lowercase topic label (e.g. 'linux', 'projects').",
-    "message":           "For 'reply' or 'antigravity', the direct chat/spoken response to the user.",
-    "selector_or_text":  "For 'browser_click' or 'browser_type', the CSS selector or the text label of the target element.",
-    "input_type":        "For 'desktop_input', either 'move', 'click', 'type', or 'shortcut'.",
-    "x":                 "For 'desktop_input' (integer X coordinate).",
-    "y":                 "For 'desktop_input' (integer Y coordinate).",
-    "control_type":      "For 'system_control', either 'volume', 'brightness', 'window', or 'launch'.",
-    "level":             "For 'system_control' (integer 0-100 for volume or brightness).",
-    "param":             "For 'system_control' window actions ('minimize', 'maximize', 'close') or app names to launch ('code', 'calculator', etc.)"
-  }}
-}}
 
 Guidelines:
 {guidelines_str}
 """
 
+# Dict-based JSON Schema for Elora action response
+ELORA_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "action": {
+            "type": "STRING",
+            "description": "The action to perform. Must be one of the allowed actions."
+        },
+        "arguments": {
+            "type": "OBJECT",
+            "properties": {
+                "prompt": {"type": "STRING", "description": "For 'antigravity', the task prompt to pass to the CLI agent."},
+                "url": {"type": "STRING", "description": "For 'browser', 'browser_browse', or 'web_scrape', the URL to open or fetch."},
+                "query": {"type": "STRING", "description": "For 'web_search', 'memory_recall', 'memory_focus', 'memory_forget' — the search query or topic."},
+                "command": {"type": "STRING", "description": "For 'command_run', the local shell command to execute."},
+                "mode": {"type": "STRING", "description": "For 'news_fetch', either 'skim' or 'deep_dive'."},
+                "index": {"type": "INTEGER", "description": "For 'news_fetch' with mode='deep_dive', the 1-based integer index of the article to open."},
+                "text": {"type": "STRING", "description": "For 'memory_store', 'browser_type', or 'desktop_input' (text/shortcut to type)."},
+                "topic": {"type": "STRING", "description": "For 'memory_store', a short lowercase topic label (e.g. 'linux', 'projects')."},
+                "message": {"type": "STRING", "description": "For 'reply' or 'antigravity', the direct chat/spoken response to the user."},
+                "selector_or_text": {"type": "STRING", "description": "For 'browser_click' or 'browser_type', the CSS selector or the text label of the target element."},
+                "input_type": {"type": "STRING", "description": "For 'desktop_input', either 'move', 'click', 'type', or 'shortcut'."},
+                "x": {"type": "INTEGER", "description": "For 'desktop_input' (integer X coordinate)."},
+                "y": {"type": "INTEGER", "description": "For 'desktop_input' (integer Y coordinate)."},
+                "control_type": {"type": "STRING", "description": "For 'system_control', either 'volume', 'brightness', 'window', or 'launch'."},
+                "level": {"type": "INTEGER", "description": "For 'system_control' (integer 0-100 for volume or brightness)."},
+                "param": {"type": "STRING", "description": "For 'system_control' window actions ('minimize', 'maximize', 'close') or app names to launch."}
+            }
+        }
+    },
+    "required": ["action"]
+}
+
+
+def convert_history_to_gemini(history: List[Dict[str, str]]) -> List[types.Content]:
+    """Converts standard chat history format into Gemini client's Content format."""
+    gemini_contents = []
+    for msg in history:
+        role = msg.get("role")
+        content = msg.get("content", "")
+        if not content:
+            continue
+            
+        gemini_role = "user"
+        if role == "assistant":
+            gemini_role = "model"
+            
+        gemini_contents.append(
+            types.Content(
+                role=gemini_role,
+                parts=[types.Part.from_text(text=content)]
+            )
+        )
+    return gemini_contents
+
 
 def query_elora(user_prompt: str, history: List[Dict[str, str]] = None) -> Dict[str, Any]:
     """
-    Queries Ollama to get the structured JSON action block.
-    
-    Why: Enforcing format="json" in the Ollama client ensures the model outputs
-    valid JSON, preventing parsing errors in our core loop.
+    Queries the Gemini API to get the structured JSON action block.
+    Supports multimodal voice commands (WAV files) and screenshot context.
     """
     config = load_config()
-    model_name = config.get("model_name", "gpt-oss:120b-cloud")
-    sys_instruction = get_dynamic_system_instruction(config)
+    model_name = config.get("model_name", "gemini-2.5-flash")
     
-    messages = [{"role": "system", "content": sys_instruction}]
-    
-    if history:
-        messages.extend(history)
-        
-    messages.append({"role": "user", "content": user_prompt})
-    
-    try:
-        logger.info("Sending request to Ollama with model %s...", model_name)
-        
-        # Call Ollama chat API enforcing JSON formatting
-        response = ollama.chat(
-            model=model_name,
-            messages=messages,
-            format="json"
-        )
+    api_key = config.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return {
+            "action": "reply",
+            "arguments": {
+                "message": "Error: Gemini API key is not configured. Please set the GEMINI_API_KEY environment variable or save it in ~/.config/elora/config.json."
+            }
+        }
 
+    sys_instruction = get_dynamic_system_instruction(config)
+    gemini_history = convert_history_to_gemini(history) if history else []
+
+    # Compile parts for the new user message
+    user_parts = []
+    
+    # 1. Check if user_prompt is a local audio WAV file
+    if user_prompt.endswith(".wav") and os.path.exists(user_prompt):
+        try:
+            with open(user_prompt, "rb") as f:
+                audio_bytes = f.read()
+            user_parts.append(
+                types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
+            )
+            # Instruct Gemini to process the speech command in the context of system instruction
+            user_parts.append(
+                types.Part.from_text(text="Listen to this voice command and determine the correct structured action.")
+            )
+            logger.info("Loaded voice command WAV file into Gemini query: %s", user_prompt)
+        except Exception as e:
+            logger.error("Failed to read voice audio file: %s", e)
+            user_parts.append(types.Part.from_text(text=f"Failed to load audio command: {user_prompt}"))
+    else:
+        user_parts.append(types.Part.from_text(text=user_prompt))
+
+    # 2. Check if a screenshot is available (captured within last 15s)
+    screenshot_path = "/tmp/elora_screenshot.png"
+    if os.path.exists(screenshot_path):
+        import time
+        if time.time() - os.path.getmtime(screenshot_path) < 15.0:
+            try:
+                with open(screenshot_path, "rb") as f:
+                    img_bytes = f.read()
+                user_parts.append(
+                    types.Part.from_bytes(data=img_bytes, mime_type="image/png")
+                )
+                logger.info("Attached desktop screenshot to Gemini query context.")
+            except Exception as e:
+                logger.error("Failed to read screenshot file: %s", e)
+
+    # Construct the final content structure
+    new_user_content = types.Content(role="user", parts=user_parts)
+    contents = gemini_history + [new_user_content]
+
+    import time
+    
+    primary_model = config.get("model_name", "gemini-2.5-flash")
+    model_candidates = [primary_model, "gemini-2.0-flash"]
+    if primary_model == "gemini-2.0-flash":
+        model_candidates = ["gemini-2.0-flash"]
+
+    client = genai.Client(api_key=api_key)
+    last_exception = None
+    
+    for model in model_candidates:
+        max_retries = 3
+        backoff = 1.0
         
-        content = response["message"]["content"]
-        logger.debug("Raw model output: %s", content)
-        
-        # Parse the JSON response
-        parsed = json.loads(content)
-        return parsed
-        
-    except json.JSONDecodeError as e:
-        logger.error("Failed to parse JSON response from Ollama: %s", str(e))
-        return {
-            "action": "reply",
-            "arguments": {
-                "message": "Error: Received malformed action payload from reasoning model."
-            }
-        }
-    except Exception as e:
-        logger.error("Ollama API connection error: %s", str(e))
-        
-        # If the cloud model is unauthorized/disconnected, provide actionable advice
-        if "Unauthorized" in str(e) or "401" in str(e):
-            return {
-                "action": "reply",
-                "arguments": {
-                    "message": "I am currently unauthorized to access the cloud reasoning model.\n"
-                               "Please run 'ollama signin' in your local GUI terminal to authenticate."
+        for attempt in range(max_retries):
+            try:
+                logger.info("Sending request to Gemini API with model %s (attempt %d/%d)...", model, attempt + 1, max_retries)
+                response = client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=sys_instruction,
+                        response_mime_type="application/json",
+                        response_schema=ELORA_RESPONSE_SCHEMA
+                    )
+                )
+                
+                content = response.text
+                logger.debug("Raw model output: %s", content)
+                parsed = json.loads(content)
+                return parsed
+                
+            except json.JSONDecodeError as decode_err:
+                logger.error("Failed to parse JSON response from Gemini: %s", str(decode_err))
+                return {
+                    "action": "reply",
+                    "arguments": {
+                        "message": "Error: Received malformed action payload from Gemini."
+                    }
                 }
-            }
-        return {
-            "action": "reply",
-            "arguments": {
-                "message": f"Error communicating with local Ollama daemon: {e}"
-            }
+            except Exception as e:
+                last_exception = e
+                err_str = str(e).lower()
+                is_transient = "503" in err_str or "429" in err_str or "500" in err_str or "unavailable" in err_str or "quota" in err_str
+                
+                if is_transient and attempt < max_retries - 1:
+                    logger.warning("Transient error %s. Retrying in %.2fs...", e, backoff)
+                    time.sleep(backoff)
+                    backoff *= 2.0
+                else:
+                    logger.warning("Model %s failed: %s. Trying next candidate if available.", model, e)
+                    break
+
+    logger.error("Gemini API connection error: All models failed. Last error: %s", str(last_exception))
+    return {
+        "action": "reply",
+        "arguments": {
+            "message": f"Error communicating with Gemini API: {last_exception}"
         }
+    }

@@ -25,7 +25,6 @@ from PySide6.QtGui import QPainter, QColor, QRadialGradient, QFont, QIcon
 from elora.brain import query_elora
 from elora.actions import execute_agent_task, open_browser_url
 from elora.news import get_news_summary, get_spoken_news_summary, open_article
-from elora.stt import _get_stt_model
 from elora.voice import speak_text
 from elora.config import load_config, save_config, set_config_override
 
@@ -33,23 +32,20 @@ logger = logging.getLogger("elora.hud")
 
 VOICE_INPUT_PATH = "/tmp/elora_voice_input.raw"
 
-# Supported Kokoro voice maps
+# Supported local Kokoro voice maps
 KOKORO_VOICES = {
     "af_heart": "Heart (US Female - Default)",
-    "af_sarah": "Sarah (US Female - Warm)",
-    "af_nicole": "Nicole (US Female - Crisp)",
-    "af_sky": "Sky (US Female - Bright)",
-    "bm_lewis": "Lewis (US Male - Deep)",
-    "bm_george": "George (US Male - Clear)",
-    "bf_emma": "Emma (UK Female - Smooth)",
-    "bf_isabella": "Isabella (UK Female - Rich)"
+    "af_bella": "Bella (US Female)",
+    "af_sarah": "Sarah (US Female)",
+    "am_adam": "Adam (US Male)",
+    "am_michael": "Michael (US Male)",
+    "bf_emma": "Emma (UK Female)",
+    "bm_george": "George (UK Male)"
 }
 
-# Supported Vosk STT models
-# Why: Allows the user to toggle between highly accurate large model and faster/lighter small model.
-VOSK_MODELS = {
-    "vosk-model-en-us-0.22-lgraph": "Accuracy (Large Model)",
-    "vosk-model-small-en-us-0.15": "Speed (Small Model)"
+# Supported STT engines
+STT_ENGINES = {
+    "gemini": "Gemini Cloud STT (Active)"
 }
 
 
@@ -410,59 +406,6 @@ class EloraHUD(QWidget):
         self.orb_layout.addWidget(self.state_label, alignment=Qt.AlignmentFlag.AlignCenter)
         self.left_layout.addWidget(self.orb_section)
 
-        # Text input field and Send button layout below the pulse circle
-        self.input_layout = QHBoxLayout()
-        self.input_layout.setContentsMargins(10, 5, 10, 10)
-        self.input_layout.setSpacing(8)
-        
-        self.input_box = QLineEdit(self)
-        self.input_box.setPlaceholderText("Type command or edit voice input...")
-        self.input_box.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.input_box.setStyleSheet("""
-            QLineEdit {
-                background-color: rgba(255, 255, 255, 0.04);
-                border: 1px solid rgba(255, 255, 255, 0.08);
-                border-radius: 8px;
-                color: #FFFFFF;
-                font-family: 'Inter', sans-serif;
-                font-size: 12px;
-                padding: 6px 10px;
-            }
-            QLineEdit:focus {
-                border-color: rgba(129, 140, 248, 0.6);
-                background-color: rgba(255, 255, 255, 0.06);
-            }
-        """)
-        self.input_layout.addWidget(self.input_box)
-        
-        self.btn_send = QPushButton("Send", self)
-        self.btn_send.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_send.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(129, 140, 248, 0.15);
-                border: 1px solid rgba(129, 140, 248, 0.3);
-                border-radius: 8px;
-                color: #818CF8;
-                font-family: 'Inter', sans-serif;
-                font-size: 11px;
-                font-weight: bold;
-                padding: 6px 12px;
-            }
-            QPushButton:hover {
-                background-color: rgba(129, 140, 248, 0.25);
-                border-color: rgba(129, 140, 248, 0.4);
-            }
-            QPushButton:pressed {
-                background-color: rgba(129, 140, 248, 0.35);
-            }
-        """)
-        self.input_layout.addWidget(self.btn_send)
-        
-        self.left_layout.addLayout(self.input_layout)
-        
-        self.input_box.returnPressed.connect(self.send_manual_input)
-        self.btn_send.clicked.connect(self.send_manual_input)
-
         # Bottom section: Tip Label
 
         self.ptt_tip = QLabel("[ Hold ALT to Speak ]   •   [ Press ESC to Exit ]", self)
@@ -510,7 +453,7 @@ class EloraHUD(QWidget):
         self.chat_layout = QVBoxLayout(self.page_chat)
         self.chat_layout.setContentsMargins(0, 0, 0, 0)
         self.console_output = QTextBrowser(self)
-        self.console_output.append("<span style='color: #818CF8;'>Elora:</span> Centralized HUD ready. Hold <b>ALT</b> to talk, edit the transcription in the text box on the left if needed, and press Enter to send.")
+        self.console_output.append("<span style='color: #818CF8;'>Elora:</span> Centralized HUD ready. Hold <b>ALT</b> to talk.")
         self.chat_layout.addWidget(self.console_output)
         
         self.stacked_widget.addWidget(self.page_chat)
@@ -586,23 +529,24 @@ class EloraHUD(QWidget):
         # Select active voice from config
         voice_cfg = self.config.get("voice", {})
         active_voice = voice_cfg.get("voice_name", "af_heart")
+        if active_voice not in KOKORO_VOICES:
+            active_voice = "af_heart"
         idx = self.cmb_voice.findData(active_voice)
         if idx != -1:
             self.cmb_voice.setCurrentIndex(idx)
         self.settings_layout.addWidget(self.cmb_voice)
 
         # STT model selection dropdown
-        # Why: Allows the user to select their desired speed/accuracy balance.
-        lbl_stt_model = QLabel("SPEECH RECOGNITION (STT) MODEL", self)
+        lbl_stt_model = QLabel("SPEECH RECOGNITION (STT) ENGINE", self)
         lbl_stt_model.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
         self.settings_layout.addWidget(lbl_stt_model)
         self.cmb_stt_model = QComboBox(self)
         self.cmb_stt_model.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        for code, label in VOSK_MODELS.items():
+        for code, label in STT_ENGINES.items():
             self.cmb_stt_model.addItem(label, code)
         # Select active STT model from config
         stt_cfg = self.config.get("stt", {})
-        active_stt_model = stt_cfg.get("model_name", "vosk-model-en-us-0.22-lgraph")
+        active_stt_model = stt_cfg.get("model_name", "gemini")
         idx_stt = self.cmb_stt_model.findData(active_stt_model)
         if idx_stt != -1:
             self.cmb_stt_model.setCurrentIndex(idx_stt)
@@ -686,6 +630,18 @@ class EloraHUD(QWidget):
                 current_custom = ""
         self.txt_custom_personality.setText(current_custom)
         self.settings_layout.addWidget(self.txt_custom_personality)
+        
+        # Gemini API Key Field
+        lbl_api_key = QLabel("GEMINI API KEY", self)
+        lbl_api_key.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
+        self.settings_layout.addWidget(lbl_api_key)
+        
+        self.txt_api_key = QLineEdit(self)
+        self.txt_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.txt_api_key.setPlaceholderText("Enter your Gemini API key...")
+        self.txt_api_key.setStyleSheet(self.txt_custom_personality.styleSheet())
+        self.txt_api_key.setText(self.config.get("gemini_api_key", ""))
+        self.settings_layout.addWidget(self.txt_api_key)
         
         # Connect change event to toggle visibility
         self.cmb_personality.currentIndexChanged.connect(self.on_personality_changed)
@@ -948,6 +904,7 @@ class EloraHUD(QWidget):
         selected_stt = self.cmb_stt_model.currentData()
         selected_personality = self.cmb_personality.currentData()
         custom_personality = self.txt_custom_personality.text().strip()
+        api_key = self.txt_api_key.text().strip()
 
         updates = {
             "voice": {
@@ -958,7 +915,8 @@ class EloraHUD(QWidget):
                 "model_name": selected_stt
             },
             "personality": selected_personality,
-            "custom_personality": custom_personality
+            "custom_personality": custom_personality,
+            "gemini_api_key": api_key
         }
         
         # Save updates to ~/.config/elora/config.json
@@ -1028,7 +986,6 @@ class EloraHUD(QWidget):
     def start_voice_recording(self):
         if self.is_recording:
             return
-        self.input_box.clear()
         self.is_recording = True
         self.update_state_ui("listening", "● LISTENING...")
         self.console_output.append("<br><span style='color: #EC4899;'>System:</span> Recording...")
@@ -1042,7 +999,7 @@ class EloraHUD(QWidget):
         if status == "recording":
             pass
         elif status == "partial_stream":
-            self.input_box.setText(text)
+            self.update_state_ui("listening", f"● LISTENING: {text}...")
         elif status == "final":
             self.handle_transcription(text)
         elif status == "error":
@@ -1065,18 +1022,14 @@ class EloraHUD(QWidget):
             self.reset_to_idle()
             return
 
-        self.input_box.setText(text)
-        self.input_box.setFocus()
         self.reset_to_idle()
-        self.console_output.append(f"<span style='color: #EC4899;'>System:</span> Transcribed: \"{text}\" (Edit if needed, then press Enter or click Send to submit)")
+        self.console_output.append(f"<span style='color: #EC4899;'>System:</span> Transcribed: \"{text}\"")
+        self.send_query(text)
 
-    def send_manual_input(self):
-        text = self.input_box.text().strip()
+    def send_query(self, text: str):
+        text = text.strip()
         if not text:
             return
-            
-        self.input_box.clear()
-        self.input_box.clearFocus()
 
         self.console_output.append(f"<span style='color: #10B981;'>You:</span> {text}")
         self.session_history.append({"role": "user", "content": text})
@@ -1208,7 +1161,6 @@ class EloraHUD(QWidget):
         if history:
             self.session_history = history
             self.console_output.clear()
-            self.console_output.append("<span style='color: #818CF8;'>Elora:</span> Centralized HUD ready. Welcome back!")
             
             for msg in history:
                 role = msg.get("role")
@@ -1226,7 +1178,7 @@ class EloraHUD(QWidget):
                         self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {content}")
 
         # Check if we have the user's name stored in memory
-        user_name = "partner" # default warm companion term
+        user_name = "boss"
         try:
             from elora.memory import is_memory_available, search_memory
             avail, _ = is_memory_available()
@@ -1258,14 +1210,11 @@ class EloraHUD(QWidget):
 
         self.update_state_ui("thinking", "WAKING UP...")
         
-        # If there's history, prompt for a welcome back. Otherwise, a startup greeting.
-        welcome_type = "welcoming the user back" if history else "welcoming the user for the first time"
         greeting_prompt = (
-            f"Generate a brief, warm, 1-sentence greeting {welcome_type}. "
-            f"The user's name is '{user_name}' (or greet them as 'partner' or another appropriate warm companion term). "
+            f"Generate an extremely short, creative, and unique 1-sentence greeting welcoming the user. "
+            f"Always greet the user as 'boss' (e.g. 'Good evening boss, what do you need?', 'What's up boss?', 'Need something done today?'). "
             f"It is currently the {time_of_day} (local time: {datetime.now().strftime('%I:%M %p')}). "
-            f"Speak in a warm, helpful Jarvis-like style (companion/partner, not robotic, no bot disclaimers). "
-            f"Let them know you are standing by. "
+            f"Keep the greeting under 10-15 words. Be casual, creative, and ready for action. "
             f"Respond strictly with a reply action."
         )
         

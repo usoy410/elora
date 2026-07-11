@@ -1,14 +1,15 @@
 """
-Elora Voice Engine.
-Integrates kokoro-onnx for local, lightweight voice synthesis.
-Handles automated model downloads and async speech playback.
+Elora Voice Engine (Gemini TTS & Local Kokoro-ONNX Fallback).
+Replaces local kokoro-onnx with Gemini API native voice synthesis,
+with a robust fallback to local kokoro-onnx if API limits/errors are encountered.
 """
 
 import os
 import sys
 import logging
-import urllib.request
 import subprocess
+import wave
+import urllib.request
 import soundfile as sf
 from typing import Optional
 
@@ -19,8 +20,6 @@ logger = logging.getLogger("elora.voice")
 
 MODELS_DIR = os.path.expanduser("~/.config/elora/models")
 TEMP_SPEECH_PATH = os.path.expanduser("~/.config/elora/speech.wav")
-
-# Tracker for active speech playback subprocess
 _active_playback_process: Optional[subprocess.Popen] = None
 
 # GitHub release endpoints for the INT8 model and voices binary
@@ -41,8 +40,6 @@ def _download_progress(count: int, block_size: int, total_size: int) -> None:
 def download_voice_assets() -> tuple[str, str]:
     """
     Checks if model and voice assets are present locally, downloading them if missing.
-    
-    Why: Keeps installation self-contained and avoids manual user setups.
     """
     os.makedirs(MODELS_DIR, exist_ok=True)
     
@@ -77,9 +74,6 @@ def download_voice_assets() -> tuple[str, str]:
 def _get_kokoro_client() -> Optional[object]:
     """
     Initializes and returns the cached Kokoro client (lazy loaded).
-    
-    Why: Ensures the startup time of Elora remains rapid, postponing
-    the model loading cost until a voice command is actually executed.
     """
     global _kokoro_client
     if _kokoro_client is not None:
@@ -98,12 +92,49 @@ def _get_kokoro_client() -> Optional[object]:
         return None
 
 
-def speak_text(text: str) -> None:
+def save_audio_payload(audio_data: bytes, mime_type: str, output_path: str) -> str:
+    """Saves audio data to a file, wrapping in a WAV container if it is raw PCM."""
+    lower_mime = mime_type.lower()
+    if "pcm" in lower_mime or "l16" in lower_mime:
+        wav_path = output_path
+        if not wav_path.endswith(".wav"):
+            wav_path = os.path.splitext(output_path)[0] + ".wav"
+            
+        # Parse rate and channels if specified, fallback to 24000 and 1
+        rate = 24000
+        channels = 1
+        for part in lower_mime.split(";"):
+            part = part.strip()
+            if part.startswith("rate="):
+                try:
+                    rate = int(part.split("=")[1])
+                except ValueError:
+                    pass
+            elif part.startswith("channels="):
+                try:
+                    channels = int(part.split("=")[1])
+                except ValueError:
+                    pass
+
+        with wave.open(wav_path, "wb") as wav_file:
+            wav_file.setnchannels(channels)
+            wav_file.setsampwidth(2)  # 16-bit
+            wav_file.setframerate(rate)
+            wav_file.writeframes(audio_data)
+        return wav_path
+    else:
+        ext = ".mp3" if "mp3" in lower_mime else ".wav"
+        file_path = os.path.splitext(output_path)[0] + ext
+        with open(file_path, "wb") as f:
+            f.write(audio_data)
+        return file_path
+
+
+def speak_text(text: str, audio_bytes: Optional[bytes] = None, mime_type: Optional[str] = None) -> None:
     """
-    Synthesizes text to speech and plays the audio asynchronously.
-    
-    Why: Saving to a temporary WAV and calling the existing play_chime() player
-    prevents blocking execution threads in either the CLI loop or GUI window.
+    Plays speech audio.
+    If pre-synthesized audio_bytes are provided, plays them directly.
+    Otherwise, uses the local kokoro-onnx model for offline voice synthesis.
     """
     global _active_playback_process
     
@@ -114,7 +145,7 @@ def speak_text(text: str) -> None:
     if not voice_config.get("enabled", False):
         return
         
-    # Stop any currently active speech subprocess first (singleton instance behavior)
+    # Stop any currently active speech subprocess
     if _active_playback_process is not None:
         try:
             _active_playback_process.terminate()
@@ -122,31 +153,41 @@ def speak_text(text: str) -> None:
         except Exception:
             pass
         _active_playback_process = None
-        
-    client = _get_kokoro_client()
-    if client is None:
-        logger.warning("Voice client unavailable. Speech synthesis skipped.")
+
+    if not text.strip() and not audio_bytes:
         return
-        
-    voice_name = voice_config.get("voice_name", "af_heart")
-    speed = voice_config.get("speed", 1.0)
-    
-    try:
-        logger.info("Synthesizing speech for text: '%s' using voice '%s'", text, voice_name)
-        
-        # Run local ONNX inference
-        samples, sample_rate = client.create(
-            text,
-            voice=voice_name,
-            speed=speed,
-            lang="en-us"
-        )
-        
-        # Write temporary WAV file
-        sf.write(TEMP_SPEECH_PATH, samples, sample_rate)
-        logger.debug("Speech WAV written to %s", TEMP_SPEECH_PATH)
-        
-        # Play the temporary WAV file and store the running process handle
-        _active_playback_process = play_chime(TEMP_SPEECH_PATH)
-    except Exception as e:
-        logger.error("Failed to synthesize or play speech: %s", e)
+
+    # If audio bytes are pre-synthesized and provided
+    if audio_bytes and mime_type:
+        try:
+            play_path = save_audio_payload(audio_bytes, mime_type, TEMP_SPEECH_PATH)
+            _active_playback_process = play_chime(play_path)
+            return
+        except Exception as e:
+            logger.error("Failed to play pre-synthesized audio: %s", e)
+
+    # Use local Kokoro-ONNX voice synthesis exclusively for dynamic text
+    if text.strip():
+        logger.info("Synthesizing speech via local Kokoro ONNX model: '%s'", text[:60])
+        client = _get_kokoro_client()
+        if client is None:
+            logger.warning("Local Voice client unavailable. Speech synthesis skipped.")
+            return
+
+        # Use voice name from configuration
+        voice_name = voice_config.get("voice_name", "af_heart")
+        if voice_name in ("Aoede", "Puck", "Charon", "Kore", "Fenrir"):
+            voice_name = "af_heart"
+        speed = voice_config.get("speed", 1.0)
+
+        try:
+            samples, sample_rate = client.create(
+                text,
+                voice=voice_name,
+                speed=speed,
+                lang="en-us"
+            )
+            sf.write(TEMP_SPEECH_PATH, samples, sample_rate)
+            _active_playback_process = play_chime(TEMP_SPEECH_PATH)
+        except Exception as local_err:
+            logger.error("Local speech synthesis failed: %s", local_err)

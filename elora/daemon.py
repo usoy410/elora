@@ -1,6 +1,6 @@
 """
 Elora Background Daemon.
-Preloads voice synthesis and speech recognition models, manages conversation context,
+Coordinates the Gemini execution loop, manages conversation context,
 and communicates with the HUD front-end via Unix sockets.
 """
 
@@ -12,13 +12,15 @@ import json
 import logging
 import threading
 import subprocess
+import wave
+import math
+import struct
 from typing import Optional, Dict, Any, List
 
 # Ensure package directory is on the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from elora.stt import _get_stt_model
-from elora.voice import _get_kokoro_client, speak_text
+from elora.voice import speak_text
 from elora.brain import query_elora
 from elora.config import load_config
 from elora.news import get_spoken_news_summary, fetch_tech_news, open_article
@@ -43,42 +45,39 @@ def add_to_history(role: str, content: str) -> None:
         session_history.pop(0)
 
 
-# Seconds of silence (no committed text arriving) before auto-finalising the utterance.
-_SILENCE_TIMEOUT_SEC = 1.8
-
 # Audio chunk size in bytes. 4000 bytes = 125ms at 16kHz / 16-bit / mono.
-# Why: Reduces polling/chunk latency from 250ms to 125ms for faster, more responsive updates.
 _CHUNK_BYTES = 4000
+
+
+def calculate_rms(audio_data: bytes) -> float:
+    """Calculates root-mean-square of raw 16-bit mono PCM audio data."""
+    count = len(audio_data) // 2
+    if count == 0:
+        return 0.0
+    format_str = f"<{count}h"
+    try:
+        shorts = struct.unpack(format_str, audio_data)
+        sum_squares = sum(s * s for s in shorts)
+        return math.sqrt(sum_squares / count)
+    except Exception:
+        return 0.0
 
 
 class ActiveSTTThread(threading.Thread):
     """
-    Handles live raw PCM recording via arecord and streams partial/final results
-    back to the connected client socket.
-
-    Optimisations vs. the previous implementation:
-    - Larger 250ms audio chunks reduce Python-level loop iterations and give Vosk
-      more acoustic context per decode call.
-    - Silence-based auto-stop: after _SILENCE_TIMEOUT_SEC of no new committed
-      text the thread finalises automatically so the caller does not need to
-      poll or send an explicit stop command.
-    - Duplicate partial_stream suppression: only sends a socket message when the
-      in-progress transcription text actually changes.
+    Handles live recording from microphone and energy-based silence detection.
+    Saves output to WAV file and notifies client.
     """
 
-    def __init__(self, conn: socket.socket, model):
+    def __init__(self, conn: socket.socket):
         super().__init__(daemon=True)
         self.conn = conn
-        self.model = model
         self.running = True
         self.process = None
 
     def run(self):
-        from vosk import KaldiRecognizer
-        rec = KaldiRecognizer(self.model, 16000)
-
-        # arecord: mono raw PCM 16kHz S16_LE, device-default, quiet
-        # Why: Pass -B 100000 (100ms) to tell ALSA to use a smaller capture buffer, reducing latency.
+        # Spawn arecord: 16kHz, 16-bit signed little-endian, mono, raw headerless output
+        # Pass -B 100000 (100ms) to tell ALSA to use a smaller capture buffer, reducing latency.
         cmd = [
             "arecord", "-r", "16000", "-f", "S16_LE", "-c", "1", "-t", "raw", "-q",
             "-B", "100000"
@@ -93,50 +92,58 @@ class ActiveSTTThread(threading.Thread):
             self._send({"status": "error", "message": "arecord failed to launch. Check audio settings."})
             return
 
+        # Silence detection settings
+        SILENCE_THRESHOLD = 400.0
+        SILENCE_TIMEOUT_SEC = 1.8
+        start_time = time.monotonic()
+        last_sound_time = time.monotonic()
+        speech_detected = False
+
         try:
-            committed_texts = []
-            last_partial_sent = ""
-            last_commit_time = time.monotonic()
+            pcm_frames = []
 
             while self.running:
-                # Read 250ms worth of PCM data per iteration
+                # Read 125ms worth of PCM data per iteration
                 data = self.process.stdout.read(_CHUNK_BYTES)
                 if not data:
                     break
 
-                if rec.AcceptWaveform(data):
-                    # Vosk detected end-of-word boundary with silence
-                    res = json.loads(rec.Result())
-                    text = res.get("text", "").strip()
-                    if text:
-                        committed_texts.append(text)
-                        last_commit_time = time.monotonic()
-                        combined = " ".join(committed_texts)
-                        # Emit a confirmed partial so the UI can update immediately
-                        self._send({"status": "partial", "text": combined})
-                        last_partial_sent = combined
-                else:
-                    # Emit live in-progress transcription, but only when it changed
-                    partial = json.loads(rec.PartialResult())
-                    partial_text = partial.get("partial", "").strip()
-                    combined = " ".join(committed_texts + ([partial_text] if partial_text else [])).strip()
-                    if combined and combined != last_partial_sent:
-                        self._send({"status": "partial_stream", "text": combined})
-                        last_partial_sent = combined
+                pcm_frames.append(data)
+                current_time = time.monotonic()
+                rms = calculate_rms(data)
+
+                # Check if speech starts
+                if rms > SILENCE_THRESHOLD:
+                    if not speech_detected:
+                        self._send({"status": "partial", "text": "Listening (Speech detected)..."})
+                    speech_detected = True
+                    last_sound_time = current_time
 
                 # Auto-finalise when silence threshold is exceeded
-                if (
-                    committed_texts
-                    and time.monotonic() - last_commit_time > _SILENCE_TIMEOUT_SEC
-                ):
-                    logger.debug("STT: silence timeout reached, auto-finalising.")
-                    break
+                if speech_detected:
+                    if current_time - last_sound_time > SILENCE_TIMEOUT_SEC:
+                        logger.debug("Silence timeout reached, finalising audio file.")
+                        break
+                else:
+                    # Timed out waiting for start of speech
+                    if current_time - start_time > 5.0:
+                        logger.debug("No speech detected.")
+                        break
 
-            # Flush any remaining partial text and emit final result
-            res = json.loads(rec.FinalResult())
-            final_segment = res.get("text", "").strip()
-            full_text = " ".join(committed_texts + ([final_segment] if final_segment else [])).strip()
-            self._send({"status": "final", "text": full_text})
+            # Save captured frames to WAV
+            output_path = "/tmp/elora_user_voice.wav"
+            duration = time.monotonic() - start_time
+            if pcm_frames and duration >= 0.5:
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                with wave.open(output_path, "wb") as wav_file:
+                    wav_file.setnchannels(1)
+                    wav_file.setsampwidth(2)  # 16-bit
+                    wav_file.setframerate(16000)
+                    wav_file.writeframes(b"".join(pcm_frames))
+                
+                self._send({"status": "final", "text": output_path})
+            else:
+                self._send({"status": "final", "text": ""})
 
         except Exception as e:
             logger.error("Error in live STT streaming loop: %s", e)
@@ -161,7 +168,7 @@ class ActiveSTTThread(threading.Thread):
         if self.process:
             try:
                 self.process.terminate()
-                self.process.wait(timeout=2)
+                self.process.wait(timeout=1)
             except Exception:
                 pass
             self.process = None
@@ -172,7 +179,6 @@ def handle_client(conn: socket.socket):
     global session_history, active_focus
     active_stt: Optional[ActiveSTTThread] = None
     
-    # Read client payloads line by line
     buffer = ""
     try:
         while True:
@@ -193,17 +199,21 @@ def handle_client(conn: socket.socket):
                     if cmd == "ping":
                         conn.sendall(b'{"status": "pong"}\n')
                         
+                    elif cmd == "update_env":
+                        env = payload.get("env", {})
+                        logger.info("Updating daemon environment from client: %s", list(env.keys()))
+                        for k, v in env.items():
+                            os.environ[k] = v
+                        conn.sendall(b'{"status": "env_updated"}\n')
+                        
                     elif cmd == "preload":
-                        logger.info("Daemon preloading models...")
-                        _get_stt_model()
-                        _get_kokoro_client()
+                        logger.info("Daemon preloaded (Zero-Local-Model mode)...")
                         conn.sendall(b'{"status": "ready"}\n')
                         
                     elif cmd == "start_listen":
                         if active_stt and active_stt.is_alive():
                             active_stt.stop()
-                        stt_model = _get_stt_model()
-                        active_stt = ActiveSTTThread(conn, stt_model)
+                        active_stt = ActiveSTTThread(conn)
                         active_stt.start()
                         
                     elif cmd == "stop_listen":
@@ -221,8 +231,6 @@ def handle_client(conn: socket.socket):
                             add_to_history("user", text)
 
                         # If a memory focus is active, prepend it as a system context
-                        # message so the LLM can reference it without injecting it into
-                        # the permanent session history.
                         effective_history = list(session_history)
                         if active_focus:
                             effective_history.insert(
@@ -242,7 +250,6 @@ def handle_client(conn: socket.socket):
                         args = result.get("arguments", {})
                         
                         if action == "reply":
-                            # Standard conversational response — speak the message directly
                             msg = args.get("message", "")
                             add_to_history("assistant", json.dumps(result))
                             speak_text(msg)
@@ -252,7 +259,6 @@ def handle_client(conn: socket.socket):
                             add_to_history("assistant", json.dumps(result))
 
                             if mode == "skim":
-                                # Fetch articles (populates cache), then speak titles-only summary
                                 fetch_tech_news()
                                 spoken = get_spoken_news_summary()
                                 speak_text(spoken)
@@ -272,8 +278,6 @@ def handle_client(conn: socket.socket):
                                     speak_text(f"Opening {title} in your browser now. Tell me if you want a summary or details about it.")
                                     open_article(idx)
 
-                                    # Inject context so follow-up questions ("summarize it",
-                                    # "give me the key points") can resolve "it" to this article.
                                     if url:
                                         add_to_history(
                                             "user",
@@ -292,7 +296,6 @@ def handle_client(conn: socket.socket):
                                 from elora.actions import open_browser_url
                                 open_browser_url(url)
 
-                                # Inject context so follow-up questions about this page work
                                 add_to_history(
                                     "user",
                                     f"[System info: Navigated Brave browser to {url}.]"
@@ -301,7 +304,6 @@ def handle_client(conn: socket.socket):
                                 speak_text("No URL was provided.")
 
                         elif action == "memory_focus":
-                            # Set the session's active focus block — persists until cleared
                             active_focus = args.get("memory_block", "")
                             msg = args.get("message", f"Focusing on \"{args.get('query', '')}\" now.")
                             add_to_history("assistant", json.dumps(result))
@@ -325,13 +327,10 @@ def handle_client(conn: socket.socket):
 
                         conn.sendall((json.dumps({"status": "response", "result": result}) + "\n").encode("utf-8"))
 
-
                     elif cmd == "clear_focus":
-                        # Wipe active focus so it's no longer prepended to queries
                         active_focus = ""
                         conn.sendall(b'{"status": "focus_cleared"}\n')
                         speak_text("Focus cleared. Back to normal conversation.")
-
                         
                     elif cmd == "speak":
                         text = payload.get("text", "")
@@ -373,22 +372,6 @@ def run_daemon():
     os.chmod(SOCKET_PATH, 0o777)
     
     logger.info("Elora Daemon active on Unix socket: %s", SOCKET_PATH)
-    logger.info("Pre-warming models and browser...")
-    try:
-        _get_stt_model()
-        _get_kokoro_client()
-        logger.info("Vosk and Kokoro models successfully loaded in background.")
-    except Exception as e:
-        logger.error("Failed to prewarm ML models: %s", e)
-        
-    try:
-        from elora.browser_control import launch_brave_with_debugging
-        if launch_brave_with_debugging():
-            logger.info("Brave browser pre-warmed successfully.")
-        else:
-            logger.warning("Brave browser pre-warming failed.")
-    except Exception as e:
-        logger.error("Failed to prewarm Brave: %s", e)
 
     try:
         while True:

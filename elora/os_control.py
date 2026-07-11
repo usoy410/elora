@@ -6,14 +6,25 @@ Uses PyAutoGUI / xdotool and listens globally for the Ctrl+Alt+C abort hotkey.
 import time
 import logging
 import threading
-import pyautogui
-from pynput import keyboard
 
 logger = logging.getLogger("elora.os_control")
 
+pyautogui = None
+try:
+    import pyautogui
+except Exception as e:
+    logger.warning("Failed to import pyautogui: %s. OS automation actions may fail.", e)
+
+keyboard = None
+try:
+    from pynput import keyboard
+except Exception as e:
+    logger.warning("Failed to import pynput: %s. Safety lock hotkey will be disabled.", e)
+
 # Global safety flags
 abort_requested = False
-pyautogui.FAILSAFE = False  # Controlled by our custom Ctrl+Alt+C hotkey instead
+if pyautogui is not None:
+    pyautogui.FAILSAFE = False  # Controlled by our custom Ctrl+Alt+C hotkey instead
 
 
 def on_abort_activated():
@@ -62,6 +73,8 @@ def check_abort():
 def move_mouse_smoothly(target_x: int, target_y: int, duration: float = 0.6) -> str:
     """Moves the host cursor smoothly to targets while checking for abort key presses."""
     check_abort()
+    if pyautogui is None:
+        return "Failed to move mouse: pyautogui is not available (check DISPLAY environment variable)."
     try:
         start_x, start_y = pyautogui.position()
         steps = 15
@@ -90,6 +103,8 @@ def move_mouse_smoothly(target_x: int, target_y: int, duration: float = 0.6) -> 
 def click_mouse_at(x: int, y: int, button: str = "left") -> str:
     """Moves the cursor and performs a click."""
     check_abort()
+    if pyautogui is None:
+        return "Failed to click: pyautogui is not available (check DISPLAY environment variable)."
     try:
         move_res = move_mouse_smoothly(x, y, duration=0.4)
         if "Safety Interrupted" in move_res:
@@ -107,6 +122,8 @@ def click_mouse_at(x: int, y: int, button: str = "left") -> str:
 def type_keyboard_text(text: str) -> str:
     """Simulates physical keyboard typing."""
     check_abort()
+    if pyautogui is None:
+        return "Failed to type text: pyautogui is not available (check DISPLAY environment variable)."
     try:
         # Check if the text matches a special key shortcut
         if "+" in text and len(text) <= 15:
@@ -125,3 +142,62 @@ def type_keyboard_text(text: str) -> str:
         return str(e)
     except Exception as e:
         return f"Failed to type keyboard input: {e}"
+
+
+def capture_desktop_screenshot(output_path: str = "/tmp/elora_screenshot.png") -> bool:
+    """
+    Captures a screenshot of the desktop.
+    First tries GNOME shell DBus screenshot (since user is on GNOME Wayland).
+    Falls back to gnome-screenshot, grim (Niri Wayland), and finally PyAutoGUI.
+    """
+    import subprocess
+    import os
+    
+    # 1. Try GNOME DBus screenshot
+    try:
+        cmd = [
+            "gdbus", "call", "--session", 
+            "--dest", "org.gnome.Shell.Screenshot", 
+            "--object-path", "/org/gnome/Shell/Screenshot", 
+            "--method", "org.gnome.Shell.Screenshot.Screenshot", 
+            "true", "false", output_path
+        ]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3.0)
+        if res.returncode == 0 and os.path.exists(output_path):
+            logger.info("Captured screenshot via GNOME Shell DBus API.")
+            return True
+    except Exception as e:
+        logger.debug("GNOME DBus screenshot failed: %s", e)
+
+    # 2. Try gnome-screenshot command utility
+    try:
+        cmd = ["gnome-screenshot", "-f", output_path]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3.0)
+        if res.returncode == 0 and os.path.exists(output_path):
+            logger.info("Captured screenshot via gnome-screenshot.")
+            return True
+    except Exception as e:
+        logger.debug("gnome-screenshot failed: %s", e)
+
+    # 3. Try grim (Wayland wlroots/Niri)
+    try:
+        cmd = ["grim", output_path]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3.0)
+        if res.returncode == 0 and os.path.exists(output_path):
+            logger.info("Captured screenshot via grim.")
+            return True
+    except Exception as e:
+        logger.debug("grim failed: %s", e)
+
+    # 4. Try pyautogui fallback
+    try:
+        screenshot = pyautogui.screenshot()
+        screenshot.save(output_path)
+        if os.path.exists(output_path):
+            logger.info("Captured screenshot via PyAutoGUI.")
+            return True
+    except Exception as e:
+        logger.error("All screenshot capture methods failed: %s", e)
+
+    return False
+

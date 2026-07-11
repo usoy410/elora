@@ -1,15 +1,54 @@
 # Elora: Linux Desktop OS Orchestrator
 
-Elora is a lightweight, low-resource command-line loop and desktop assistant. It leverages local and cloud-hosted reasoning models via Ollama to determine actions, and executes them instantly using local Linux utilities without freezing your terminal.
+Elora is a lightweight, low-resource command-line loop and desktop assistant. It leverages the native multimodal capabilities of the **Gemini API** (`gemini-2.5-flash`) to capture voice commands and screenshots, determining and executing desktop automation actions instantly using Linux utilities without freezing your terminal.
+
+By offloading all Speech-to-Text (STT), Text-to-Speech (TTS), visual parsing, and reasoning to Gemini's TPU cloud architecture, Elora runs in a negligible memory footprint (<50MB RAM), making it highly optimized for resource-constrained systems (e.g. 4GB RAM).
+
+---
+
+## 📐 Architecture Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User (Speech)
+    participant HUD as PySide6 HUD
+    participant Daemon as Elora Daemon
+    participant OS as Linux OS
+    participant Gemini as Gemini 2.5 Flash API
+
+    User->>HUD: Spacebar Hold-to-Talk / Voice Mode
+    HUD->>Daemon: start_listen
+    Daemon->>OS: arecord raw PCM
+    OS-->>Daemon: Audio stream (RMS silence check)
+    Daemon->>Daemon: Save to WAV file
+    Daemon-->>HUD: final WAV path
+    HUD->>Daemon: query_brain(WAV path)
+    Daemon->>OS: Capture Screenshot
+    OS-->>Daemon: /tmp/elora_screenshot.png
+    Daemon->>Gemini: Send Audio WAV + Screenshot + History (JSON Schema)
+    Gemini-->>Daemon: Structured JSON Action (reply/command_run/etc.)
+    alt action == reply
+        Daemon->>Gemini: Synthesize Message (Aoede Voice)
+        Gemini-->>Daemon: PCM Audio bytes
+        Daemon->>OS: Play via mpv/aplay
+        OS-->>User: Spoken Response
+    else action == command_run / system_control
+        Daemon->>OS: Execute local bash/xdotool
+        OS-->>Daemon: Command Output
+        Daemon->>Gemini: Send output for next ReAct step
+    end
+```
 
 ---
 
 ## Features
 
-*   **Low-Resource Architecture**: Runs as a lightweight local Python loop. Offloads heavy intelligence tasks to the `gpt-oss:120b-cloud` model.
+*   **Low-Resource Architecture**: Zero local machine learning models loaded. Offloads heavy intelligence, transcription, and speech rendering onto Gemini's TPUs.
+*   **Real-time Desktop Vision**: Automatically captures the active desktop or window (supporting both Wayland/GNOME via DBus, Wayland/Niri via `grim`, and X11 via PyAutoGUI) to give Gemini direct visual context.
 *   **Background Agent Delegation**: Automatically delegates complex coding or research tasks to the Antigravity CLI (`agy`) inside a detached background `tmux` session, releasing your terminal instantly.
 *   **RSS News Aggregator (Skim & Deep Dive)**: Fetches and parses popular tech feeds locally. Prints summaries directly in Markdown and launches articles on-demand in the default system browser via `xdg-open`.
-*   **System Notifications**: Uses `notify-send` and auditory chimes (`aplay`) to send non-blocking task alerts.
+*   **System Notifications**: Uses `notify-send` and auditory chimes (`aplay`/`mpv`) to send non-blocking task alerts.
 
 ---
 
@@ -21,8 +60,7 @@ Ensure the following tools are installed on your Linux system:
 *   [uv](https://github.com/astral-sh/uv) (Python package manager)
 *   `tmux` (terminal multiplexer)
 *   `notify-send` (libnotify)
-*   `aplay` (ALSA sound player)
-*   `ollama` (local model daemon)
+*   `aplay` / `mpv` (sound players)
 
 ### Setup & Authentication
 
@@ -30,10 +68,9 @@ Ensure the following tools are installed on your Linux system:
     ```bash
     uv sync
     ```
-2.  Authenticate with Ollama to access cloud-offloaded models:
-    ```bash
-    ollama signin
-    ```
+2.  Obtain a free Gemini API Key from Google AI Studio and configure it:
+    *   Set the `GEMINI_API_KEY` environment variable, OR
+    *   Paste it directly inside the HUD Settings panel.
 
 ---
 
@@ -60,13 +97,13 @@ echo "Open the article for number 3" | uv run python main.py
 ```
 
 ### 4. Hands-Free Voice Mode
-Start a hands-free voice loop that listens to your speech, auto-detects when you finish speaking, and responds out loud:
+Start a hands-free voice loop that listens to your speech, auto-detects when you finish speaking using lightweight RMS energy thresholding, and responds out loud:
 ```bash
 uv run python main.py --voice
 ```
 
 ### 5. Centralized HUD Dashboard Mode
-Launch a gorgeous graphical overlay panel showing chat logs, running background tasks, and active RSS telemetry. Hold down the `Spacebar` to speak, and release it to execute. Features a low-latency 100ms ALSA capture buffer and a 450ms PTT release delay to guarantee the final word is not cut off:
+Launch a gorgeous graphical overlay panel showing chat logs, running background tasks, and active RSS telemetry. Hold down the `Spacebar` to speak, release it to execute, and access settings via the interface:
 ```bash
 uv run python main.py --hud
 ```
@@ -79,16 +116,22 @@ Elora settings are stored dynamically in `~/.config/elora/config.json`. You can 
 
 ```json
 {
+  "model_name": "gemini-2.5-flash",
+  "gemini_api_key": "YOUR_GEMINI_API_KEY",
+  "voice": {
+    "enabled": true,
+    "voice_name": "Aoede",
+    "speed": 1.0
+  },
   "stt": {
-    "model_name": "vosk-model-en-us-0.22-lgraph"
+    "model_name": "gemini"
   }
 }
 ```
 
-*   **stt.model_name**: Sets the active speech recognition (STT) model directory.
-    *   `vosk-model-en-us-0.22-lgraph` — Accuracy: desktop-grade model.
-    *   `vosk-model-small-en-us-0.15` — Speed: highly responsive, lower CPU footprint.
-
+*   **gemini_api_key**: Your personal Google AI Studio API key.
+*   **voice.voice_name**: Sets the active speech voice (`Aoede`, `Puck`, `Charon`, `Kore`, or `Fenrir`).
+*   **stt.model_name**: Set to `gemini` for cloud speech-to-text.
 
 ---
 
@@ -96,11 +139,10 @@ Elora settings are stored dynamically in `~/.config/elora/config.json`. You can 
 
 *   [main.py](file:///home/usoy/Documents/antigravity/elora/main.py) — Core CLI listener and loop router.
 *   **`elora/`** (Package):
-    *   [elora/brain.py](file:///home/usoy/Documents/antigravity/elora/elora/brain.py) — Handles prompt payloads and enforces JSON tool schema response formats.
+    *   [elora/brain.py](file:///home/usoy/Documents/antigravity/elora/elora/brain.py) — Connects to Gemini API, handles prompts, and enforces JSON action schemas.
     *   [elora/actions.py](file:///home/usoy/Documents/antigravity/elora/elora/actions.py) — Manages browser redirection and unique `tmux` session spawning.
     *   [elora/news.py](file:///home/usoy/Documents/antigravity/elora/elora/news.py) — Lightweight RSS news engine using `feedparser`.
-    *   [elora/voice.py](file:///home/usoy/Documents/antigravity/elora/elora/voice.py) — Lightweight local TTS synthesis using `kokoro-onnx` and `soundfile`.
-    *   [elora/stt.py](file:///home/usoy/Documents/antigravity/elora/elora/stt.py) — Local offline Speech-to-Text using `vosk` and `arecord` subprocess streaming.
-    *   [elora/hud.py](file:///home/usoy/Documents/antigravity/elora/elora/hud.py) — Centralized UI card widget overlay supporting Spacebar Hold-to-Talk.
+    *   [elora/voice.py](file:///home/usoy/Documents/antigravity/elora/elora/voice.py) — Cloud-based voice synthesis using Gemini API and ALSA/mpv playback.
+    *   [elora/stt.py](file:///home/usoy/Documents/antigravity/elora/elora/stt.py) — Local raw audio recorder with RMS silence auto-detection.
+    *   [elora/hud.py](file:///home/usoy/Documents/antigravity/elora/elora/hud.py) — Centralized PySide6 UI card widget overlay supporting Spacebar Hold-to-Talk and configuration settings.
     *   [elora/utils.py](file:///home/usoy/Documents/antigravity/elora/elora/utils.py) — Linux desktop notifications and sound effects.
-

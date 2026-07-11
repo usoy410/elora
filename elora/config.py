@@ -17,7 +17,8 @@ CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 
 # Default system settings if no config file exists
 DEFAULT_SETTINGS: Dict[str, Any] = {
-    "model_name": "gpt-oss:120b-cloud",
+    "model_name": "gemini-2.5-flash",
+    "gemini_api_key": "",
     "news": {
         "feeds": [
             "https://news.ycombinator.com/rss",
