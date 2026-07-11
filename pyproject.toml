@@ -6,12 +6,23 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.15.0",
+    "chromadb>=0.6.0",
     "feedparser>=6.0.12",
     "kokoro-onnx>=0.5.0",
     "ollama>=0.6.2",
     "playwright>=1.61.0",
     "pyside6>=6.11.1",
     "requests>=2.34.2",
+    "sentence-transformers>=3.0.0",
     "soundfile>=0.14.0",
+    "torch",
     "vosk>=0.3.45",
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }

@@ -32,6 +32,8 @@ logger = logging.getLogger("elora.daemon")
 
 SOCKET_PATH = "/tmp/elora.sock"
 session_history: List[Dict[str, str]] = []
+# Active focus block — injected as context prefix when set; cleared on 'clear focus'
+active_focus: str = ""
 
 
 def add_to_history(role: str, content: str) -> None:
@@ -44,9 +46,9 @@ def add_to_history(role: str, content: str) -> None:
 # Seconds of silence (no committed text arriving) before auto-finalising the utterance.
 _SILENCE_TIMEOUT_SEC = 1.8
 
-# Audio chunk size in bytes. 8000 bytes = 250ms at 16kHz / 16-bit / mono.
-# Larger chunks reduce Python loop overhead and give Vosk better context per call.
-_CHUNK_BYTES = 8000
+# Audio chunk size in bytes. 4000 bytes = 125ms at 16kHz / 16-bit / mono.
+# Why: Reduces polling/chunk latency from 250ms to 125ms for faster, more responsive updates.
+_CHUNK_BYTES = 4000
 
 
 class ActiveSTTThread(threading.Thread):
@@ -76,7 +78,11 @@ class ActiveSTTThread(threading.Thread):
         rec = KaldiRecognizer(self.model, 16000)
 
         # arecord: mono raw PCM 16kHz S16_LE, device-default, quiet
-        cmd = ["arecord", "-r", "16000", "-f", "S16_LE", "-c", "1", "-t", "raw", "-q"]
+        # Why: Pass -B 100000 (100ms) to tell ALSA to use a smaller capture buffer, reducing latency.
+        cmd = [
+            "arecord", "-r", "16000", "-f", "S16_LE", "-c", "1", "-t", "raw", "-q",
+            "-B", "100000"
+        ]
         try:
             self.process = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
@@ -163,7 +169,7 @@ class ActiveSTTThread(threading.Thread):
 
 def handle_client(conn: socket.socket):
     """Processes incoming IPC requests from client interfaces."""
-    global session_history
+    global session_history, active_focus
     active_stt: Optional[ActiveSTTThread] = None
     
     # Read client payloads line by line
@@ -211,15 +217,25 @@ def handle_client(conn: socket.socket):
                     elif cmd == "query_brain":
                         text = payload.get("text", "")
                         add_to_history("user", text)
-                        
+
+                        # If a memory focus is active, prepend it as a system context
+                        # message so the LLM can reference it without injecting it into
+                        # the permanent session history.
+                        effective_history = list(session_history)
+                        if active_focus:
+                            effective_history.insert(
+                                max(0, len(effective_history) - 1),
+                                {"role": "user", "content": active_focus}
+                            )
+
                         def status_cb(status_text: str):
                             try:
                                 conn.sendall((json.dumps({"status": "brain_status", "text": status_text}) + "\n").encode("utf-8"))
                             except Exception:
                                 pass
-                                
+
                         from elora.agent import run_agent_loop
-                        result = run_agent_loop(text, session_history, status_cb)
+                        result = run_agent_loop(text, effective_history, status_cb)
                         action = result.get("action")
                         args = result.get("arguments", {})
                         
@@ -242,15 +258,29 @@ def handle_client(conn: socket.socket):
                             elif mode == "deep_dive":
                                 idx = args.get("index")
                                 if idx is not None:
-                                    # Find article title for spoken confirmation
                                     from elora.news import _article_cache
                                     try:
                                         article_idx = int(idx) - 1
-                                        title = _article_cache[article_idx].get("title", "the article") if _article_cache else "the article"
+                                        article = _article_cache[article_idx] if _article_cache else {}
+                                        title = article.get("title", "the article")
+                                        url = article.get("link", "")
                                     except Exception:
-                                        title = "the article"
+                                        title, url = "the article", ""
+
                                     speak_text(f"Opening {title} in your browser now.")
                                     open_article(idx)
+
+                                    # Inject context so follow-up questions ("summarize it",
+                                    # "give me the key points") can resolve "it" to this article.
+                                    if url:
+                                        add_to_history(
+                                            "user",
+                                            f"[System context] I just opened the article titled "
+                                            f'"{title}" in the browser. Its URL is: {url}. '
+                                            "If the user asks for a summary, key points, or any "
+                                            "details about it, use web_scrape on that URL to fetch "
+                                            "the content first, then reply conversationally."
+                                        )
                                 else:
                                     speak_text("I couldn't find which article you wanted to open.")
 
@@ -258,16 +288,38 @@ def handle_client(conn: socket.socket):
                             url = args.get("url", "")
                             add_to_history("assistant", json.dumps(result))
                             if url:
-                                # Speak a clean version without the full URL
                                 from urllib.parse import urlparse
                                 domain = urlparse(url).netloc or url
                                 speak_text(f"Opening {domain} in Brave.")
                                 from elora.actions import open_browser_url
                                 open_browser_url(url)
+
+                                # Inject context so follow-up questions about this page work
+                                add_to_history(
+                                    "user",
+                                    f"[System context] I just navigated to {url} in Brave. "
+                                    "If the user asks for a summary or details about it, "
+                                    "use web_scrape on that URL to fetch the content first, "
+                                    "then reply conversationally."
+                                )
                             else:
                                 speak_text("No URL was provided.")
 
+                        elif action == "memory_focus":
+                            # Set the session's active focus block — persists until cleared
+                            active_focus = args.get("memory_block", "")
+                            msg = args.get("message", f"Focusing on \"{args.get('query', '')}\" now.")
+                            add_to_history("assistant", json.dumps(result))
+                            speak_text(msg)
+
                         conn.sendall((json.dumps({"status": "response", "result": result}) + "\n").encode("utf-8"))
+
+
+                    elif cmd == "clear_focus":
+                        # Wipe active focus so it's no longer prepended to queries
+                        active_focus = ""
+                        conn.sendall(b'{"status": "focus_cleared"}\n')
+                        speak_text("Focus cleared. Back to normal conversation.")
 
                         
                     elif cmd == "speak":

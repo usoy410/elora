@@ -45,6 +45,14 @@ KOKORO_VOICES = {
     "bf_isabella": "Isabella (UK Female - Rich)"
 }
 
+# Supported Vosk STT models
+# Why: Allows the user to toggle between highly accurate large model and faster/lighter small model.
+VOSK_MODELS = {
+    "vosk-model-en-us-0.22-lgraph": "Accuracy (Large Model)",
+    "vosk-model-small-en-us-0.15": "Speed (Small Model)"
+}
+
+
 
 class DaemonSTTThread(QThread):
     """Background thread delegating live audio recording and Vosk STT to the daemon."""
@@ -523,6 +531,23 @@ class EloraHUD(QWidget):
             self.cmb_voice.setCurrentIndex(idx)
         self.settings_layout.addWidget(self.cmb_voice)
 
+        # STT model selection dropdown
+        # Why: Allows the user to select their desired speed/accuracy balance.
+        lbl_stt_model = QLabel("SPEECH RECOGNITION (STT) MODEL", self)
+        lbl_stt_model.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
+        self.settings_layout.addWidget(lbl_stt_model)
+        self.cmb_stt_model = QComboBox(self)
+        self.cmb_stt_model.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        for code, label in VOSK_MODELS.items():
+            self.cmb_stt_model.addItem(label, code)
+        # Select active STT model from config
+        stt_cfg = self.config.get("stt", {})
+        active_stt_model = stt_cfg.get("model_name", "vosk-model-en-us-0.22-lgraph")
+        idx_stt = self.cmb_stt_model.findData(active_stt_model)
+        if idx_stt != -1:
+            self.cmb_stt_model.setCurrentIndex(idx_stt)
+        self.settings_layout.addWidget(self.cmb_stt_model)
+
         # TTS speech speed slider
         self.lbl_speed_val = QLabel("SPEED: 1.0x", self)
         self.lbl_speed_val.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
@@ -588,6 +613,12 @@ class EloraHUD(QWidget):
 
         # Launch dynamic startup greeting welcoming user
         QTimer.singleShot(800, self.trigger_startup_greeting)
+
+        # PTT release timer to prevent speech cut-off
+        # Why: Introduces a 450ms tail delay after releasing Space so the last spoken words are fully captured.
+        self.ptt_release_timer = QTimer(self)
+        self.ptt_release_timer.setSingleShot(True)
+        self.ptt_release_timer.timeout.connect(self.stop_voice_recording)
 
         # Install global application event filter to intercept keyboard presses
         QApplication.instance().installEventFilter(self)
@@ -687,15 +718,19 @@ class EloraHUD(QWidget):
         save_config(updates)
 
     def save_settings(self):
-        """Saves active voice and custom instructions configurations to disk."""
+        """Saves active voice, STT model, and custom instructions configurations to disk."""
         selected_voice = self.cmb_voice.currentData()
         selected_speed = self.sld_speed.value() / 100.0
+        selected_stt = self.cmb_stt_model.currentData()
         custom_instructions = self.txt_instructions.toPlainText().strip()
 
         updates = {
             "voice": {
                 "voice_name": selected_voice,
                 "speed": selected_speed
+            },
+            "stt": {
+                "model_name": selected_stt
             },
             "custom_instructions": custom_instructions
         }
@@ -738,7 +773,12 @@ class EloraHUD(QWidget):
                     return False  # Let the text box handle it
                 
                 if not event.isAutoRepeat():
-                    self.start_voice_recording()
+                    # If user re-presses space bar during the 450ms tail delay, cancel the stop timer.
+                    # Why: Provides a seamless continuation of recording if they quickly tap/hold again.
+                    if self.ptt_release_timer.isActive():
+                        self.ptt_release_timer.stop()
+                    else:
+                        self.start_voice_recording()
                 return True  # Consume the key event
             elif event.key() == Qt.Key.Key_Escape:
                 if self.record_process:
@@ -754,7 +794,9 @@ class EloraHUD(QWidget):
                     return False
                 
                 if not event.isAutoRepeat():
-                    self.stop_voice_recording()
+                    # Delay calling stop_voice_recording by 450ms to prevent clipping the tail end of speech.
+                    # Why: Human release latency and audio card buffers mean the last word is still being captured.
+                    self.ptt_release_timer.start(450)
                 return True
                 
         return super().eventFilter(watched, event)
@@ -885,6 +927,27 @@ class EloraHUD(QWidget):
                 else:
                     self.console_output.append("<span style='color: #EF4444;'>System: Failed to spawn background task.</span>")
 
+        elif action == "memory_focus":
+            # Show a focus indicator in the console; actual focus state lives in daemon
+            query = args.get("query", "")
+            msg = args.get("message", f"Focusing on \"{query}\" now.")
+            self.console_output.append(
+                f"<span style='color: #2DD4BF;'>🧠 Focus:</span> "
+                f"<span style='color: #D1D5DB;'>{msg}</span>"
+            )
+            self.update_state_ui("speaking", "SPEAKING...")
+            QTimer.singleShot(1000, self.reset_to_idle)
+
+        elif action == "reply":
+            # Catch memory_store / memory_recall / memory_forget confirmations
+            # that arrive as standard reply actions
+            msg = args.get("message", "")
+            self.session_history.append({"role": "assistant", "content": msg})
+            if len(self.session_history) > 20:
+                self.session_history.pop(0)
+            self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {msg}")
+            self.update_state_ui("speaking", "SPEAKING...")
+            QTimer.singleShot(1500, self.reset_to_idle)
 
     def reset_to_idle(self):
         self.update_state_ui("idle", "[ HOLD SPACE TO TALK ]")

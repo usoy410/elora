@@ -17,8 +17,10 @@ logger = logging.getLogger("elora.stt")
 
 MODELS_DIR = os.path.expanduser("~/.config/elora/models")
 
-# Cached Vosk Model instance
+# Cached Vosk Model instance and its loaded name
 _stt_model = None
+_loaded_model_name = None
+
 
 
 def _download_progress(count: int, block_size: int, total_size: int) -> None:
@@ -75,13 +77,24 @@ def download_stt_model() -> str:
 
 
 def _get_stt_model():
-    """Lazy loaded singleton pattern for the Vosk Model client."""
-    global _stt_model
-    if _stt_model is None:
+    """
+    Lazy loaded singleton pattern for the Vosk Model client.
+    
+    Why: Keeps memory overhead low by delay-loading model weights until needed,
+    and supports dynamic reloading if user updates settings.
+    """
+    global _stt_model, _loaded_model_name
+    from elora.config import load_config
+    config = load_config()
+    stt_cfg = config.get("stt", {})
+    model_name = stt_cfg.get("model_name", "vosk-model-en-us-0.22-lgraph")
+
+    if _stt_model is None or _loaded_model_name != model_name:
         model_path = download_stt_model()
         from vosk import Model
-        logger.info("Loading Vosk Model from %s", model_path)
+        logger.info("Loading Vosk Model %s from %s", model_name, model_path)
         _stt_model = Model(model_path)
+        _loaded_model_name = model_name
     return _stt_model
 
 
@@ -96,8 +109,9 @@ def listen_voice() -> str:
     """
     # Silence duration (seconds) with committed text before auto-returning
     _SILENCE_TIMEOUT_SEC = 1.8
-    # 250ms of 16kHz / 16-bit / mono audio
-    _CHUNK_BYTES = 8000
+    # 125ms of 16kHz / 16-bit / mono audio
+    # Why: Reduces chunk latency from 250ms to 125ms for faster, more responsive updates.
+    _CHUNK_BYTES = 4000
 
     try:
         model = _get_stt_model()
@@ -110,7 +124,11 @@ def listen_voice() -> str:
     rec = KaldiRecognizer(model, 16000)
 
     # Spawn arecord: 16kHz, 16-bit signed little-endian, mono, raw headerless output
-    cmd = ["arecord", "-r", "16000", "-f", "S16_LE", "-c", "1", "-t", "raw", "-q"]
+    # Why: Pass -B 100000 (100ms) to tell ALSA to use a smaller capture buffer, reducing latency.
+    cmd = [
+        "arecord", "-r", "16000", "-f", "S16_LE", "-c", "1", "-t", "raw", "-q",
+        "-B", "100000"
+    ]
 
     try:
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)

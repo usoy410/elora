@@ -66,10 +66,29 @@ uv run python main.py --voice
 ```
 
 ### 5. Centralized HUD Dashboard Mode
-Launch a gorgeous graphical overlay panel showing chat logs, running background tasks, and active RSS telemetry. Hold down the `Spacebar` to speak, and release it to execute:
+Launch a gorgeous graphical overlay panel showing chat logs, running background tasks, and active RSS telemetry. Hold down the `Spacebar` to speak, and release it to execute. Features a low-latency 100ms ALSA capture buffer and a 450ms PTT release delay to guarantee the final word is not cut off:
 ```bash
 uv run python main.py --hud
 ```
+
+---
+
+## Configuration
+
+Elora settings are stored dynamically in `~/.config/elora/config.json`. You can modify them directly inside the HUD Settings panel, or manually customize the file:
+
+```json
+{
+  "stt": {
+    "model_name": "vosk-model-en-us-0.22-lgraph"
+  }
+}
+```
+
+*   **stt.model_name**: Sets the active speech recognition (STT) model directory.
+    *   `vosk-model-en-us-0.22-lgraph` — Accuracy: desktop-grade model.
+    *   `vosk-model-small-en-us-0.15` — Speed: highly responsive, lower CPU footprint.
+
 
 ---
 

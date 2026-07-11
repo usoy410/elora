@@ -25,13 +25,19 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
     custom_prompt = config.get("custom_instructions", DEFAULT_CUSTOM_INSTRUCTION)
     skills_cfg = config.get("skills", {"web_search": True, "web_scrape": True, "command_run": True})
     
-    allowed_actions = ["antigravity", "browser", "news_fetch", "reply"]
+    allowed_actions = ["antigravity", "browser", "news_fetch", "reply",
+                        "memory_store", "memory_recall", "memory_focus", "memory_forget"]
     guidelines = [
         "4. Use 'antigravity' for coding, workspace automation, or heavy calculations.",
         "5. Use 'browser' to open a webpage on the user's desktop browser (e.g. \"open github.com\").",
         "6. Use 'news_fetch' with mode 'skim' when asked for tech news or updates.",
         "7. Use 'news_fetch' with mode 'deep_dive' and the 'index' number when asked to open a specific news article from a previous list.",
-        "8. Use 'reply' to talk to the user, answer questions with gathered data, or request clarification."
+        "8. Use 'reply' to talk to the user, answer questions with gathered data, or request clarification.",
+        "9. Use 'memory_store' when the user says 'remember that', 'save this', or 'keep in mind' — extract the key fact as 'text' and infer a short 'topic' label.",
+        "10. Use 'memory_recall' when the user says 'do you remember', 'what do you know about', or 'recall' — set 'query' to the topic they're asking about.",
+        "11. Use 'memory_focus' when the user says 'focus on [topic]', 'let's talk about [topic]', or 'switch to [topic]' — set 'query' to the topic.",
+        "12. Use 'memory_forget' when the user says 'forget' or 'delete from memory' — set 'query' to what should be erased.",
+        "13. Use 'memory_recall' when the user says 'what have you remembered' or 'list your memories' — set query to 'all'.",
     ]
     
     # Prepend dynamic options if enabled
@@ -55,12 +61,14 @@ You must respond strictly with a valid JSON object matching this schema:
 {{
   "action": {actions_str},
   "arguments": {{
-    "prompt": "For 'antigravity', the task prompt to pass to the CLI agent.",
-    "url": "For 'browser' or 'web_scrape', the URL to open or fetch.",
-    "query": "For 'web_search', the search query.",
+    "prompt":  "For 'antigravity', the task prompt to pass to the CLI agent.",
+    "url":     "For 'browser' or 'web_scrape', the URL to open or fetch.",
+    "query":   "For 'web_search', 'memory_recall', 'memory_focus', 'memory_forget' — the search query or topic.",
     "command": "For 'command_run', the local shell command to execute.",
-    "mode": "For 'news_fetch', either 'skim' (to summarize news) or 'deep_dive' (to open an article).",
-    "index": "For 'news_fetch' with mode='deep_dive', the 1-based integer index of the article to open.",
+    "mode":    "For 'news_fetch', either 'skim' (to summarize news) or 'deep_dive' (to open an article).",
+    "index":   "For 'news_fetch' with mode='deep_dive', the 1-based integer index of the article to open.",
+    "text":    "For 'memory_store', the exact fact or statement to remember.",
+    "topic":   "For 'memory_store', a short lowercase topic label (e.g. 'linux', 'kubernetes', 'projects').",
     "message": "For 'reply', the direct chat response to the user."
   }}
 }}
