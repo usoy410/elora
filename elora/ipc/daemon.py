@@ -452,6 +452,10 @@ def handle_client(conn: socket.socket):
                         text = payload.get("text", "")
                         speak_text(text)
                         conn.sendall(b'{"status": "done"}\n')
+
+                    elif cmd == "is_speaking":
+                        from elora.skills.voice import is_speaking
+                        conn.sendall((json.dumps({"status": "speaking_status", "is_speaking": is_speaking()}) + "\n").encode("utf-8"))
                         
                     elif cmd == "get_history":
                         conn.sendall((json.dumps({"status": "history", "history": session_history}) + "\n").encode("utf-8"))

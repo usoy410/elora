@@ -56,6 +56,8 @@ STT_ENGINES = {
 
 class EloraHUD(QWidget):
     """Centralized HUD interface styled with modern dark obsidian cards."""
+    speaking_state_signal = Signal(bool)
+
     def __init__(self):
         super().__init__()
         self.session_history = []
@@ -65,6 +67,10 @@ class EloraHUD(QWidget):
         self.task_list_thread = None
         self.task_log_thread = None
         self.task_cancel_thread = None
+
+        self.speaking_state_signal.connect(self.on_speaking_state_changed)
+        self.speaking_poll_timer = QTimer(self)
+        self.speaking_poll_timer.timeout.connect(self.poll_speaking_status)
 
         self.setObjectName("EloraHUD")
         self.setWindowTitle("Elora HUD")
@@ -724,6 +730,46 @@ class EloraHUD(QWidget):
         self.console_output.append("<span style='color: #818CF8;'>Elora:</span> Conversation restarted.")
         self.trigger_startup_greeting()
 
+    @Slot(bool)
+    def on_speaking_state_changed(self, active: bool):
+        """
+        Slot to handle voice synthesis speaking state changes.
+        
+        Why: Synchronizes the visual green glowing state of the AI Core orb and
+        the "SPEAKING..." label with the actual status of the local Kokoro engine.
+        """
+        if active:
+            # Check if voice feedback is actually enabled
+            voice_enabled = self.config.get("voice", {}).get("enabled", False)
+            if not voice_enabled:
+                self.reset_to_idle()
+                return
+            self.update_state_ui("speaking", "SPEAKING...")
+            self.start_speaking_poll()
+        else:
+            self.speaking_poll_timer.stop()
+            self.reset_to_idle()
+
+    def start_speaking_poll(self):
+        """Starts a high-frequency polling timer to track voice playback status."""
+        self.speaking_poll_timer.start(200)
+
+    def poll_speaking_status(self):
+        """Polls the daemon to see if the voice playback is still active."""
+        import threading
+        def check_bg():
+            try:
+                from elora.ipc.daemon_client import EloraDaemonClient
+                c = EloraDaemonClient()
+                res = c.send_cmd({"cmd": "is_speaking"})
+                is_active = res.get("is_speaking", False)
+                if not is_active:
+                    self.speaking_state_signal.emit(False)
+            except Exception:
+                self.speaking_state_signal.emit(False)
+                
+        threading.Thread(target=check_bg, name="EloraSpeakingPollThread", daemon=True).start()
+
     def update_state_ui(self, state: str, text: str):
         self.state_label.setText(text)
         self.orb.set_state(state)
@@ -950,8 +996,7 @@ class EloraHUD(QWidget):
                 self.session_history.pop(0)
 
             self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {msg}")
-            self.update_state_ui("speaking", "SPEAKING...")
-            QTimer.singleShot(1500, self.reset_to_idle)
+            self.on_speaking_state_changed(True)
 
         elif action == "news_fetch":
             mode = args.get("mode", "skim")
@@ -960,15 +1005,13 @@ class EloraHUD(QWidget):
                 summary = get_news_summary()
                 self.console_output.append(f"<pre style='color: #D1D5DB;'>{summary}</pre>")
                 self.load_news_skimmer()
-                self.update_state_ui("speaking", "SPEAKING...")
-                QTimer.singleShot(500, self.reset_to_idle)
+                self.on_speaking_state_changed(True)
 
             elif mode == "deep_dive":
                 idx = args.get("index")
                 if idx is not None:
                     self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> Opening article {idx} in Brave...")
-                    self.update_state_ui("speaking", "SPEAKING...")
-                    QTimer.singleShot(800, self.reset_to_idle)
+                    self.on_speaking_state_changed(True)
                 else:
                     self.console_output.append("<span style='color: #EF4444;'>System: Article index missing for deep dive.</span>")
 
@@ -978,8 +1021,7 @@ class EloraHUD(QWidget):
                 from urllib.parse import urlparse
                 domain = urlparse(url).netloc or url
                 self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> Opening {domain} in Brave...")
-                self.update_state_ui("speaking", "SPEAKING...")
-                QTimer.singleShot(800, self.reset_to_idle)
+                self.on_speaking_state_changed(True)
             else:
                 self.console_output.append("<span style='color: #EF4444;'>System: No URL provided.</span>")
 
@@ -998,8 +1040,7 @@ class EloraHUD(QWidget):
                     self.session_history.pop(0)
                 
                 self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {message}")
-                self.update_state_ui("speaking", "SPEAKING...")
-                QTimer.singleShot(1500, self.reset_to_idle)
+                self.on_speaking_state_changed(True)
                 
                 session = result.get("session")
                 if session:
@@ -1014,8 +1055,7 @@ class EloraHUD(QWidget):
                 f"<span style='color: #2DD4BF;'>🧠 Focus:</span> "
                 f"<span style='color: #D1D5DB;'>{msg}</span>"
             )
-            self.update_state_ui("speaking", "SPEAKING...")
-            QTimer.singleShot(1000, self.reset_to_idle)
+            self.on_speaking_state_changed(True)
 
         elif action == "reply":
             msg = args.get("message", "")
@@ -1023,8 +1063,7 @@ class EloraHUD(QWidget):
             if len(self.session_history) > 20:
                 self.session_history.pop(0)
             self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {msg}")
-            self.update_state_ui("speaking", "SPEAKING...")
-            QTimer.singleShot(1500, self.reset_to_idle)
+            self.on_speaking_state_changed(True)
 
     def reset_to_idle(self):
         self.update_state_ui("idle", "[ HOLD ALT TO TALK ]")
@@ -1106,8 +1145,7 @@ class EloraHUD(QWidget):
             self.console_output.clear()
             self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {update_text}")
             
-            self.update_state_ui("speaking", "SPEAKING...")
-            QTimer.singleShot(1500, self.reset_to_idle)
+            self.update_state_ui("thinking", "SYNTHESIZING...")
 
             import threading
             def speak_update_bg():
@@ -1121,8 +1159,10 @@ class EloraHUD(QWidget):
                         "content": json.dumps({"action": "reply", "arguments": {"message": update_text}})
                     })
                     c.send_cmd({"cmd": "speak", "text": update_text})
+                    self.speaking_state_signal.emit(True)
                 except Exception as bg_err:
                     logger.error("Failed to speak startup update: %s", bg_err)
+                    self.speaking_state_signal.emit(False)
 
             threading.Thread(target=speak_update_bg, daemon=True).start()
             return
@@ -1173,8 +1213,7 @@ class EloraHUD(QWidget):
         self.console_output.clear()
         self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {local_greeting}")
         
-        self.update_state_ui("speaking", "SPEAKING...")
-        QTimer.singleShot(1500, self.reset_to_idle)
+        self.update_state_ui("thinking", "SYNTHESIZING...")
 
         import threading
         def play_greeting_bg():
@@ -1187,8 +1226,10 @@ class EloraHUD(QWidget):
                     "content": json.dumps({"action": "reply", "arguments": {"message": local_greeting}})
                 })
                 c.send_cmd({"cmd": "speak", "text": local_greeting})
+                self.speaking_state_signal.emit(True)
             except Exception as bg_err:
                 logger.error("Failed to play startup greeting in background thread: %s", bg_err)
+                self.speaking_state_signal.emit(False)
 
         threading.Thread(target=play_greeting_bg, daemon=True).start()
 

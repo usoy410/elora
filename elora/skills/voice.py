@@ -203,3 +203,19 @@ def speak_text(text: str, audio_bytes: Optional[bytes] = None, mime_type: Option
             _active_playback_process = play_chime(TEMP_SPEECH_PATH)
         except Exception as local_err:
             logger.error("Local speech synthesis failed: %s", local_err)
+
+
+def is_speaking() -> bool:
+    """
+    Checks if the voice engine is currently playing speech audio.
+    
+    Why: Allows the UI to synchronize its visual speaking state with the actual audio playback.
+    """
+    global _active_playback_process
+    if _active_playback_process is not None:
+        if _active_playback_process.poll() is None:
+            return True
+        else:
+            _active_playback_process = None
+    return False
+
