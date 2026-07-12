@@ -93,7 +93,8 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
         "16. Use 'browser_type' to fill text in an input field on the active Brave page (e.g. selector_or_text='search', text='weather').",
         "17. Use 'browser_get_elements' to retrieve a list of all visible/interactive page elements to understand the current page layout.",
         "18. Use 'desktop_input' to control mouse cursor/keyboard universally on the system. Types are 'move' (requires x, y), 'click' (requires x, y), 'type' (requires text), or 'shortcut' (requires text, e.g. 'alt+tab').",
-        "19. Use 'system_control' to adjust OS controls. Types are 'volume' (requires level), 'brightness' (requires level), 'window' (requires param: 'minimize', 'maximize', 'close'), or 'launch' (requires param: app name, e.g., 'code', 'chrome', 'calculator')."
+        "19. Use 'system_control' to adjust OS controls. Types are 'volume' (requires level), 'brightness' (requires level), 'window' (requires param: 'minimize', 'maximize', 'close'), or 'launch' (requires param: app name, e.g., 'code', 'chrome', 'calculator').",
+        "20. To stop or cancel a running background agent task (e.g., 'agy'), use 'command_run' with `tmux kill-session -t <session_name>`. You can see running tasks via `tmux list-sessions` or by checking `~/.config/elora/tasks.json`."
     ]
     
     if skills_cfg.get("web_search", True):
