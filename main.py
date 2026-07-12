@@ -13,9 +13,9 @@ from typing import List, Dict
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("elora.main")
 
-from elora.brain import query_elora
-from elora.actions import execute_agent_task, open_browser_url
-from elora.news import get_news_summary, open_article
+from elora.core.brain import query_elora
+from elora.skills.actions import execute_agent_task, open_browser_url
+from elora.skills.news import get_news_summary, open_article
 from elora.utils import send_notification
 
 # Store a short message history to maintain context during interactive sessions
@@ -47,7 +47,7 @@ def process_action(payload: Dict[str, any]) -> None:
         add_to_history("assistant", json.dumps(payload))
         
         # Trigger speech synthesis dynamically if enabled
-        from elora.voice import speak_text
+        from elora.skills.voice import speak_text
         speak_text(message)
         
         
@@ -99,7 +99,7 @@ def process_action(payload: Dict[str, any]) -> None:
             print(f"\nElora: {message}\n")
             
             # Trigger speech synthesis dynamically if enabled
-            from elora.voice import speak_text
+            from elora.skills.voice import speak_text
             speak_text(message)
             
             session = execute_agent_task(prompt)
@@ -121,10 +121,50 @@ def execute_single_prompt(prompt: str) -> None:
     """
     from elora.agent import run_agent_loop
     
-    def print_status(status_text: str):
-        print(f"[*] {status_text}")
+    def print_status(event: Any):
+        if isinstance(event, dict):
+            etype = event.get("type")
+            if etype == "thought":
+                print(f"\n[Thinking] {event.get('text')}")
+            elif etype == "tool_start":
+                tool = event.get("tool")
+                args = event.get("arguments", {})
+                if tool == "command_run":
+                    print(f"[*] Executing command: {args.get('command')}")
+                elif tool == "web_search":
+                    print(f"[*] Searching web for: '{args.get('query')}'")
+                elif tool == "web_scrape":
+                    print(f"[*] Scraping webpage: {args.get('url')}")
+                elif tool.startswith("browser_"):
+                    print(f"[*] Browser action: {tool} with args {args}")
+                elif tool == "desktop_input":
+                    print(f"[*] Desktop input: {args.get('input_type')}")
+                elif tool == "system_control":
+                    print(f"[*] System control: {args.get('control_type')}")
+                else:
+                    print(f"[*] Starting action '{tool}'...")
+            elif etype == "tool_output":
+                tool = event.get("tool")
+                output = event.get("output", "")
+                if output:
+                    lines = str(output).strip().splitlines()
+                    snippet = lines[0] if lines else ""
+                    if len(lines) > 1:
+                        snippet += f" ... ({len(lines)-1} more lines)"
+                    print(f"[-] Tool '{tool}' returned: {snippet}")
+                else:
+                    print(f"[-] Tool '{tool}' completed.")
+            elif etype == "confirm_request":
+                # In CLI execute_single_prompt, run_agent_loop will fallback to input() if confirm_callback is None,
+                # but we can print a warning notice here anyway
+                pass
+        else:
+            print(f"[*] {event}")
         
     add_to_history("user", prompt)
+    
+    # We must import Any for type annotations inside execute_single_prompt
+    from typing import Any
     result = run_agent_loop(prompt, session_history, print_status)
     process_action(result)
 
@@ -161,8 +201,8 @@ def start_voice_assistant_loop() -> None:
     Runs a hands-free conversational voice assistant loop.
     Repeatedly listens for voice input, executes prompt, and speaks response.
     """
-    from elora.stt import listen_voice
-    from elora.config import set_config_override
+    from elora.skills.stt import listen_voice
+    from elora.core.config import set_config_override
     from elora.utils import play_chime
     import os
     
@@ -181,7 +221,7 @@ def start_voice_assistant_loop() -> None:
     # Dynamic startup greeting
     print("Elora: Standing by...")
     try:
-        from elora.voice import speak_text
+        from elora.skills.voice import speak_text
         from datetime import datetime
         import random
         
@@ -207,7 +247,7 @@ def start_voice_assistant_loop() -> None:
         logger.error("Failed to generate voice loop startup greeting: %s", e)
         fallback = "Hello, I am Elora. Standing by."
         print(f"Elora: {fallback}\n")
-        from elora.voice import speak_text
+        from elora.skills.voice import speak_text
         speak_text(fallback)
         add_to_history("assistant", json.dumps({"action": "reply", "arguments": {"message": fallback}}))
     
@@ -217,14 +257,21 @@ def start_voice_assistant_loop() -> None:
             if os.path.exists(chime_path):
                 play_chime(chime_path)
                 
-            user_input = listen_voice()
-            if not user_input:
+            voice_path = listen_voice()
+            if not voice_path:
                 continue
                 
-            print(f"\nYou said: \"{user_input}\"")
+            print("\nElora: Transcribing...")
+            from elora.core.brain import transcribe_audio
+            transcribed_text = transcribe_audio(voice_path)
+            if not transcribed_text:
+                print("Elora: Could not transcribe audio or no speech detected.")
+                continue
+                
+            print(f"\nYou said: \"{transcribed_text}\"")
             
             # Execute the prompt
-            execute_single_prompt(user_input)
+            execute_single_prompt(transcribed_text)
             
         except KeyboardInterrupt:
             print("\nGoodbye!")
@@ -250,7 +297,7 @@ def ensure_daemon_running() -> None:
         
         # Detach child from parent process group so it runs persistent
         subprocess.Popen(
-            [sys.executable, "-m", "elora.daemon"],
+            [sys.executable, "-m", "elora.ipc.daemon"],
             cwd=base_dir,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -277,7 +324,7 @@ def main() -> None:
     if len(sys.argv) > 1:
         # Check if the user wants to start the daemon process directly
         if sys.argv[1] == "--daemon":
-            from elora.daemon import run_daemon
+            from elora.ipc.daemon import run_daemon
             run_daemon()
             return
 

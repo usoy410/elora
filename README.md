@@ -22,8 +22,10 @@ sequenceDiagram
     Daemon->>OS: arecord raw PCM
     OS-->>Daemon: Audio stream (RMS silence check)
     Daemon->>Daemon: Save to WAV file
-    Daemon-->>HUD: final WAV path
-    HUD->>Daemon: query_brain(WAV path)
+    Daemon->>Gemini: Transcribe WAV to text (transcribe_audio)
+    Gemini-->>Daemon: Transcribed text
+    Daemon-->>HUD: final transcribed text
+    HUD->>Daemon: query_brain(transcribed text)
     Daemon->>OS: Capture Screenshot
     OS-->>Daemon: /tmp/elora_screenshot.png
     Daemon->>Gemini: Send Audio WAV + Screenshot + History (JSON Schema)
@@ -49,6 +51,10 @@ sequenceDiagram
 *   **Background Agent Delegation**: Automatically delegates complex coding or research tasks to the Antigravity CLI (`agy`) inside a detached background `tmux` session, releasing your terminal instantly.
 *   **RSS News Aggregator (Skim & Deep Dive)**: Fetches and parses popular tech feeds locally. Prints summaries directly in Markdown and launches articles on-demand in the default system browser via `xdg-open`.
 *   **System Notifications**: Uses `notify-send` and auditory chimes (`aplay`/`mpv`) to send non-blocking task alerts.
+*   **Action Telemetry & Thought Tracing**: Exposes the AI agent's reasoning process (`thought` blocks) and comprehensive tool start and outcome logs (collapsible details panel in HUD and formatted telemetry blocks in CLI).
+*   **Safe Gate Guardrails**: Automatically detects and halts potentially destructive commands (e.g., matching keywords like `rm`, `dd`, `sudo`, or system path redirections) and prompts the user for explicit confirmation (Approve/Deny) before execution while letting safe commands run freely.
+*   **Intelligent Non-Interactive Execution**: Automatically rewrites common interactive shell commands (e.g., `npx create-next-app`, `npm init`, `yarn init`) to inject non-interactive flags (e.g., `-y`, `--yes`) and modern defaults, preventing subprocesses from hanging on standard input prompts.
+
 
 ---
 

@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any, List
 from google import genai
 from google.genai import types
-from elora.config import load_config
+from elora.core.config import load_config
 
 logger = logging.getLogger("elora.brain")
 
@@ -104,7 +104,7 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
         guidelines.insert(1, "2. Use 'web_scrape' to fetch and read the plain text content of a specific webpage URL.")
     if skills_cfg.get("command_run", True):
         allowed_actions.append("command_run")
-        guidelines.insert(2, "3. Use 'command_run' to execute local shell commands (e.g., copying/moving/deleting files, creating directories, running scripts, package commands, or system queries) to autonomously perform actions on behalf of the user.")
+        guidelines.insert(2, "3. Use 'command_run' to execute local shell commands (e.g., copying/moving/deleting files, creating directories, running scripts, package commands, or system queries) to autonomously perform actions on behalf of the user. Always use non-interactive flags (e.g., '-y', '--yes') for initializations, package managers, and tool installations to prevent prompts from hanging.")
         
     guidelines_str = "\n".join(guidelines)
     
@@ -118,6 +118,10 @@ Guidelines:
 ELORA_RESPONSE_SCHEMA = {
     "type": "OBJECT",
     "properties": {
+        "thought": {
+            "type": "STRING",
+            "description": "Your internal step-by-step reasoning explaining why you are choosing the current action."
+        },
         "action": {
             "type": "STRING",
             "description": "The action to perform. Must be one of the allowed actions."
@@ -168,6 +172,62 @@ def convert_history_to_gemini(history: List[Dict[str, str]]) -> List[types.Conte
             )
         )
     return gemini_contents
+
+
+def transcribe_audio(audio_path: str) -> str:
+    """
+    Transcribes a local WAV file to text using Gemini.
+    
+    Why: Resolves voice queries to clean text prompts before executing ReAct reasoning,
+         preventing raw file paths from leaking into the LLM history and agent prompts.
+    """
+    if not os.path.exists(audio_path):
+        logger.error("Audio path does not exist: %s", audio_path)
+        return ""
+
+    config = load_config()
+    api_key = config.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        logger.error("Gemini API key is not configured for transcription.")
+        return ""
+
+    try:
+        with open(audio_path, "rb") as f:
+            audio_bytes = f.read()
+
+        client = genai.Client(api_key=api_key)
+        
+        primary_model = config.get("model_name", "gemini-2.5-flash")
+        model_candidates = [primary_model, "gemini-2.0-flash"]
+        if primary_model == "gemini-2.0-flash":
+            model_candidates = ["gemini-2.0-flash"]
+
+        last_exception = None
+        for model in model_candidates:
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=[
+                        types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
+                        types.Part.from_text(
+                            text="Transcribe the following audio recording into text. Respond ONLY with the transcription, nothing else. Do not add any commentary, notes, or formatting. If the audio is silent or contains no speech, respond with an empty string."
+                        )
+                    ]
+                )
+                transcription = response.text.strip()
+                logger.info("Transcribed audio successfully: %s", transcription)
+                return transcription
+            except Exception as e:
+                last_exception = e
+                logger.warning("Transcription failed with model %s: %s", model, e)
+                
+        if last_exception:
+            logger.error("All models failed to transcribe audio. Last error: %s", last_exception)
+            
+    except Exception as e:
+        logger.error("Failed to transcribe audio file: %s", e)
+
+    return ""
 
 
 def query_elora(user_prompt: str, history: List[Dict[str, str]] = None) -> Dict[str, Any]:

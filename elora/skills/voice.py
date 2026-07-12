@@ -13,7 +13,7 @@ import urllib.request
 import soundfile as sf
 from typing import Optional
 
-from elora.config import load_config
+from elora.core.config import load_config
 from elora.utils import play_chime
 
 logger = logging.getLogger("elora.voice")

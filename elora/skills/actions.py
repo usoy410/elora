@@ -76,7 +76,7 @@ def _monitor_session(session_name: str, task_prompt: str, start_time: float) -> 
     
     # Speak completion alert out loud dynamically
     try:
-        from elora.voice import speak_text
+        from elora.skills.voice import speak_text
         if preview_opened:
             speak_text(f"Task complete. Opening the preview of {opened_file_name} in your browser.")
         else:
@@ -117,11 +117,12 @@ def execute_agent_task(prompt: str) -> str:
     start_time = time.time()
     
     # Locate the absolute path of agy
-    agy_path = "/home/usoy/.local/bin/agy"
+    import shutil
+    agy_path = shutil.which("agy") or "/usr/bin/agy"
     
     # Construct the tmux shell invocation command safely using shlex.quote
     escaped_prompt = shlex.quote(prompt)
-    cmd_str = f"{agy_path} --prompt-interactive {escaped_prompt}"
+    cmd_str = f"{agy_path} --dangerously-skip-permissions --mode accept-edits --prompt-interactive {escaped_prompt}"
     
     # tmux command: tmux new-session -d -s session_name "cmd"
     tmux_cmd = ["tmux", "new-session", "-d", "-s", session_name, cmd_str]
@@ -171,7 +172,7 @@ def open_browser_url(url: str) -> bool:
     elif url.startswith("~"):
         url = os.path.expanduser(url)
 
-    from elora.config import load_config
+    from elora.core.config import load_config
     config = load_config()
     browser_cmd = config.get("browser", {}).get("default_command", "xdg-open")
     

@@ -6,12 +6,12 @@ Manages multi-turn query loops, tool execution, and history updates.
 import logging
 from typing import Dict, Any, List, Callable, Optional
 
-from elora.brain import query_elora
-from elora.skills import search_duckduckgo, scrape_webpage, run_local_command
-from elora.browser_control import execute_browser_action
-from elora.os_control import move_mouse_smoothly, click_mouse_at, type_keyboard_text
-from elora.system_skills import set_system_volume, set_system_brightness, perform_window_action, launch_application
-from elora.memory import (
+from elora.core.brain import query_elora
+from elora.skills.skills import search_duckduckgo, scrape_webpage, run_local_command
+from elora.skills.browser_control import execute_browser_action
+from elora.skills.os_control import move_mouse_smoothly, click_mouse_at, type_keyboard_text
+from elora.skills.system_skills import set_system_volume, set_system_brightness, perform_window_action, launch_application
+from elora.core.memory import (
     store_memory,
     search_memory,
     list_memory_topics,
@@ -27,7 +27,8 @@ logger = logging.getLogger("elora.agent")
 def run_agent_loop(
     initial_prompt: str,
     history: List[Dict[str, str]],
-    status_callback: Optional[Callable[[str], None]] = None
+    status_callback: Optional[Callable[[Any], None]] = None,
+    confirm_callback: Optional[Callable[[str, Dict[str, Any]], bool]] = None
 ) -> Dict[str, Any]:
     """
     Executes the multi-turn ReAct reasoning loop.
@@ -42,21 +43,44 @@ def run_agent_loop(
     step_count = 0
     max_steps = 5
     
+    def _report_status(payload: Any):
+        if status_callback:
+            try:
+                status_callback(payload)
+            except TypeError:
+                # Fallback for simple string receivers
+                if isinstance(payload, dict):
+                    if payload.get("type") == "thought":
+                        status_callback(f"Thought: {payload.get('text')}")
+                    elif payload.get("type") == "tool_start":
+                        status_callback(f"Executing {payload.get('tool')} with {payload.get('arguments')}")
+                    elif payload.get("type") == "tool_output":
+                        status_callback(f"Tool {payload.get('tool')} finished.")
+                    elif payload.get("type") == "confirm_request":
+                        status_callback(f"Requesting confirmation for {payload.get('action')}")
+                else:
+                    status_callback(str(payload))
+    
     while step_count < max_steps:
         step_count += 1
         logger.info("Agent Loop Turn %d/%d", step_count, max_steps)
         
         # Capture a fresh screenshot of the desktop/active window so the model has real-time visual context
         try:
-            from elora.os_control import capture_desktop_screenshot
+            from elora.skills.os_control import capture_desktop_screenshot
             capture_desktop_screenshot()
         except Exception as e:
             logger.debug("Failed to capture screenshot: %s", e)
 
         # Query the Ollama brain
         result = query_elora(current_prompt, history=loop_history)
+        thought = result.get("thought", "")
         action = result.get("action")
         args = result.get("arguments", {})
+        
+        # Report reasoning thought
+        if thought:
+            _report_status({"type": "thought", "text": thought})
         
         # End loop on terminal actions
         if action in ("reply", "browser", "news_fetch", "antigravity",
@@ -74,7 +98,16 @@ def run_agent_loop(
                 return _handle_memory_forget(args)
             return result
             
-        elif action == "web_search":
+        # Report tool start
+        if action in ("web_search", "web_scrape", "command_run", "browser_browse", "browser_click",
+                      "browser_type", "browser_get_elements", "desktop_input", "system_control"):
+            _report_status({
+                "type": "tool_start",
+                "tool": action,
+                "arguments": args
+            })
+            
+        if action == "web_search":
             query = args.get("query", "")
             if not query:
                 msg = "Tool execution skipped: Query parameter missing."
@@ -85,11 +118,16 @@ def run_agent_loop(
                 
             status_msg = f"Searching the web for: '{query}'"
             logger.info(status_msg)
-            if status_callback:
-                status_callback(status_msg)
                 
             # Run DuckDuckGo search
             search_result = search_duckduckgo(query)
+            
+            _report_status({
+                "type": "tool_output",
+                "tool": "web_search",
+                "arguments": args,
+                "output": search_result
+            })
             
             # Feed back to the LLM context
             loop_history.append({"role": "user", "content": f"System Tool Output (web_search for '{query}'):\n{search_result}"})
@@ -106,11 +144,16 @@ def run_agent_loop(
                 
             status_msg = f"Scraping webpage text from: {url}"
             logger.info(status_msg)
-            if status_callback:
-                status_callback(status_msg)
                 
             # Run webpage text scraper
             scrape_result = scrape_webpage(url)
+            
+            _report_status({
+                "type": "tool_output",
+                "tool": "web_scrape",
+                "arguments": args,
+                "output": scrape_result
+            })
             
             # Feed back to LLM context
             loop_history.append({"role": "user", "content": f"System Tool Output (web_scrape of {url}):\n{scrape_result}"})
@@ -125,13 +168,62 @@ def run_agent_loop(
                 current_prompt = "Provide your next action block."
                 continue
                 
+            # Safe Gate checks for destructive shell commands
+            from elora.core.config import load_config
+            from elora.utils import is_destructive_command
+            config = load_config()
+            safe_gate_enabled = config.get("safe_gate_mode", True)
+            
+            if safe_gate_enabled and is_destructive_command(cmd):
+                _report_status({
+                    "type": "confirm_request",
+                    "action": "command_run",
+                    "arguments": args
+                })
+                
+                approved = False
+                if confirm_callback:
+                    try:
+                        approved = confirm_callback("command_run", args)
+                    except Exception as e:
+                        logger.error("Error in confirmation callback: %s", e)
+                else:
+                    # CLI Terminal fallback prompt
+                    try:
+                        user_choice = input(
+                            f"\n[!] WARNING: Elora wants to run a potentially destructive command:\n"
+                            f"    {cmd}\n"
+                            f"Allow execution? (y/N): "
+                        ).strip().lower()
+                        approved = user_choice in ("y", "yes")
+                    except Exception:
+                        approved = False
+                        
+                if not approved:
+                    msg = f"Tool execution blocked: Command '{cmd}' denied by user confirmation."
+                    logger.warning(msg)
+                    loop_history.append({"role": "user", "content": f"System Alert: {msg}"})
+                    _report_status({
+                        "type": "tool_output",
+                        "tool": "command_run",
+                        "arguments": args,
+                        "output": "Error: Command execution denied by user."
+                    })
+                    current_prompt = "Provide your next action block."
+                    continue
+                
             status_msg = f"Executing shell command: '{cmd}'"
             logger.info(status_msg)
-            if status_callback:
-                status_callback(status_msg)
                 
             # Execute local shell utility command
             command_result = run_local_command(cmd)
+            
+            _report_status({
+                "type": "tool_output",
+                "tool": "command_run",
+                "arguments": args,
+                "output": command_result
+            })
             
             # Feed output back
             loop_history.append({"role": "user", "content": f"System Tool Output (command_run for '{cmd}'):\n{command_result}"})
@@ -140,39 +232,55 @@ def run_agent_loop(
         elif action == "browser_browse":
             url = args.get("url", "")
             status_msg = f"Browsing Brave to URL: {url}"
-            if status_callback:
-                status_callback(status_msg)
             res = execute_browser_action("browse", url=url)
+            _report_status({
+                "type": "tool_output",
+                "tool": "browser_browse",
+                "arguments": args,
+                "output": res
+            })
             loop_history.append({"role": "user", "content": f"System Tool Output (browser_browse of {url}): {res}"})
             current_prompt = f"Analyze navigation outcome for {url} and determine next action."
-
+ 
         elif action == "browser_click":
             sel = args.get("selector_or_text", "")
             status_msg = f"Clicking element matching '{sel}' on Brave page"
-            if status_callback:
-                status_callback(status_msg)
             res = execute_browser_action("click", selector_or_text=sel)
+            _report_status({
+                "type": "tool_output",
+                "tool": "browser_click",
+                "arguments": args,
+                "output": res
+            })
             loop_history.append({"role": "user", "content": f"System Tool Output (browser_click on '{sel}'): {res}"})
             current_prompt = f"Analyze click outcome for '{sel}' and determine next action."
-
+ 
         elif action == "browser_type":
             sel = args.get("selector_or_text", "")
             val = args.get("text", "")
             status_msg = f"Typing '{val}' into input '{sel}' on Brave page"
-            if status_callback:
-                status_callback(status_msg)
             res = execute_browser_action("type", selector_or_text=sel, text=val)
+            _report_status({
+                "type": "tool_output",
+                "tool": "browser_type",
+                "arguments": args,
+                "output": res
+            })
             loop_history.append({"role": "user", "content": f"System Tool Output (browser_type '{val}' into '{sel}'): {res}"})
             current_prompt = f"Analyze input typing outcome for '{sel}' and determine next action."
-
+ 
         elif action == "browser_get_elements":
             status_msg = "Extracting visible elements from Brave page"
-            if status_callback:
-                status_callback(status_msg)
             res = execute_browser_action("get_elements")
+            _report_status({
+                "type": "tool_output",
+                "tool": "browser_get_elements",
+                "arguments": args,
+                "output": res
+            })
             loop_history.append({"role": "user", "content": f"System Tool Output (browser_get_elements): {res}"})
             current_prompt = "Identify target elements from page structure and determine next action."
-
+ 
         elif action == "desktop_input":
             itype = args.get("input_type", "")
             x_coord = args.get("x", 0)
@@ -180,8 +288,6 @@ def run_agent_loop(
             text_val = args.get("text", "")
             
             status_msg = f"Simulating OS input: {itype}"
-            if status_callback:
-                status_callback(status_msg)
                 
             res = ""
             if itype == "move":
@@ -193,17 +299,21 @@ def run_agent_loop(
             else:
                 res = f"Error: Unknown input type '{itype}'"
                 
+            _report_status({
+                "type": "tool_output",
+                "tool": "desktop_input",
+                "arguments": args,
+                "output": res
+            })
             loop_history.append({"role": "user", "content": f"System Tool Output (desktop_input: {itype}): {res}"})
             current_prompt = f"Analyze desktop input outcome and determine next action."
-
+ 
         elif action == "system_control":
             ctype = args.get("control_type", "")
             lvl = args.get("level", 0)
             param_val = args.get("param", "")
             
             status_msg = f"Adjusting system control: {ctype}"
-            if status_callback:
-                status_callback(status_msg)
                 
             res = ""
             if ctype == "volume":
@@ -217,6 +327,12 @@ def run_agent_loop(
             else:
                 res = f"Error: Unknown control type '{ctype}'"
                 
+            _report_status({
+                "type": "tool_output",
+                "tool": "system_control",
+                "arguments": args,
+                "output": res
+            })
             loop_history.append({"role": "user", "content": f"System Tool Output (system_control: {ctype}): {res}"})
             current_prompt = f"Analyze system control adjustment outcome and determine next action."
             
@@ -231,6 +347,7 @@ def run_agent_loop(
             "message": "I've conducted extensive background research but hit my execution step limit before compiling the answer. Please try asking a more focused question."
         }
     }
+
 
 
 # ── Memory action handlers ─────────────────────────────────────────────────────

@@ -39,7 +39,7 @@ def play_chime(sound_path: Optional[str] = None) -> Optional[subprocess.Popen]:
     Why: Auditory feedback allows the user to know when long-running tasks
     complete in the background without needing to look at notifications.
     """
-    from elora.config import load_config
+    from elora.core.config import load_config
     config = load_config()
     sound_config = config.get("sound", {})
     
@@ -72,5 +72,46 @@ def play_chime(sound_path: Optional[str] = None) -> Optional[subprocess.Popen]:
     except FileNotFoundError as e:
         logger.warning("Required audio player utility not found. Audio chime skipped: %s", e)
         return None
+
+
+def is_destructive_command(cmd: str) -> bool:
+    """
+    Checks if a shell command contains potentially destructive operations.
+    Excludes safe subcommands (e.g., 'systemctl status').
+    
+    Why: Prevents accidental system damage while allowing harmless info-gathering tasks.
+    """
+    import shlex
+    import os
+    cmd_lower = cmd.lower()
+    
+    # 1. Check for dangerous executables
+    destructive_tokens = {
+        "rm", "dd", "mkfs", "chown", "chmod", "reboot", "shutdown", 
+        "init", "systemctl", "kill", "killall", "pkill"
+    }
+    
+    try:
+        tokens = shlex.split(cmd_lower)
+    except Exception:
+        tokens = cmd_lower.split()
+        
+    for token in tokens:
+        # Check for direct match or path containing the destructive command
+        base_token = os.path.basename(token)
+        if base_token in destructive_tokens:
+            # Allow safe systemctl subcommands
+            if base_token == "systemctl" and any(sub in tokens for sub in ["status", "is-active", "show", "list-units"]):
+                continue
+            return True
+            
+    # 2. Check for redirect modifications of system/config files (e.g. > /etc/...)
+    if ">" in cmd_lower or ">>" in cmd_lower:
+        for path in ["/etc/", "/var/", "/boot/", "/sys/", "/proc/"]:
+            if path in cmd_lower:
+                return True
+                
+    return False
+
 
 

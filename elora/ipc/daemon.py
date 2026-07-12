@@ -20,10 +20,10 @@ from typing import Optional, Dict, Any, List
 # Ensure package directory is on the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from elora.voice import speak_text
-from elora.brain import query_elora
-from elora.config import load_config
-from elora.news import get_spoken_news_summary, fetch_tech_news, open_article
+from elora.skills.voice import speak_text
+from elora.core.brain import query_elora
+from elora.core.config import load_config
+from elora.skills.news import get_spoken_news_summary, fetch_tech_news, open_article
 
 # Setup daemon logging
 logging.basicConfig(
@@ -141,7 +141,13 @@ class ActiveSTTThread(threading.Thread):
                     wav_file.setframerate(16000)
                     wav_file.writeframes(b"".join(pcm_frames))
                 
-                self._send({"status": "final", "text": output_path})
+                # Send a partial status showing that transcription is happening
+                self._send({"status": "partial", "text": "Transcribing..."})
+                
+                from elora.core.brain import transcribe_audio
+                transcribed_text = transcribe_audio(output_path)
+                
+                self._send({"status": "final", "text": transcribed_text})
             else:
                 self._send({"status": "final", "text": ""})
 
@@ -209,7 +215,7 @@ def handle_client(conn: socket.socket):
                     elif cmd == "preload":
                         logger.info("Daemon preloaded. Initiating model preloading...")
                         try:
-                            from elora.voice import preload_voice_model
+                            from elora.skills.voice import preload_voice_model
                             threading.Thread(target=preload_voice_model, name="EloraVoicePreloadThread", daemon=True).start()
                         except Exception as e:
                             logger.error("Failed to preload voice model on cmd: %s", e)
@@ -243,14 +249,44 @@ def handle_client(conn: socket.socket):
                                 {"role": "user", "content": active_focus}
                             )
 
-                        def status_cb(status_text: str):
+                        def status_cb(event: Any):
                             try:
-                                conn.sendall((json.dumps({"status": "brain_status", "text": status_text}) + "\n").encode("utf-8"))
-                            except Exception:
-                                pass
+                                if isinstance(event, dict):
+                                    conn.sendall((json.dumps({"status": "brain_telemetry", "telemetry": event}) + "\n").encode("utf-8"))
+                                else:
+                                    conn.sendall((json.dumps({"status": "brain_status", "text": str(event)}) + "\n").encode("utf-8"))
+                            except Exception as e:
+                                logger.error("Failed to send status update: %s", e)
 
-                        from elora.agent import run_agent_loop
-                        result = run_agent_loop(text, effective_history, status_cb)
+                        def confirm_cb(action: str, args: Dict[str, Any]) -> bool:
+                            try:
+                                # Send confirmation request over the socket
+                                payload = {
+                                    "status": "confirm_request",
+                                    "action": action,
+                                    "arguments": args
+                                }
+                                conn.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+                                
+                                # Read response synchronously
+                                response_bytes = b""
+                                while b"\n" not in response_bytes:
+                                    chunk = conn.recv(1024)
+                                    if not chunk:
+                                        return False
+                                    response_bytes += chunk
+                                    
+                                line = response_bytes.split(b"\n")[0].decode("utf-8").strip()
+                                resp = json.loads(line)
+                                if resp.get("cmd") == "confirm_response":
+                                    return resp.get("approved", False)
+                                return False
+                            except Exception as e:
+                                logger.error("Error waiting for user confirmation via IPC: %s", e)
+                                return False
+
+                        from elora.core.agent import run_agent_loop
+                        result = run_agent_loop(text, effective_history, status_cb, confirm_cb)
                         action = result.get("action")
                         args = result.get("arguments", {})
                         
@@ -271,7 +307,7 @@ def handle_client(conn: socket.socket):
                             elif mode == "deep_dive":
                                 idx = args.get("index")
                                 if idx is not None:
-                                    from elora.news import _article_cache
+                                    from elora.skills.news import _article_cache
                                     try:
                                         article_idx = int(idx) - 1
                                         article = _article_cache[article_idx] if _article_cache else {}
@@ -298,7 +334,7 @@ def handle_client(conn: socket.socket):
                                 from urllib.parse import urlparse
                                 domain = urlparse(url).netloc or url
                                 speak_text(f"Opening {domain} in Brave. Tell me if you want a summary or details about it.")
-                                from elora.actions import open_browser_url
+                                from elora.skills.actions import open_browser_url
                                 open_browser_url(url)
 
                                 add_to_history(
@@ -326,7 +362,7 @@ def handle_client(conn: socket.socket):
                             add_to_history("assistant", json.dumps(result))
                             speak_text(message)
                             
-                            from elora.actions import execute_agent_task
+                            from elora.skills.actions import execute_agent_task
                             session = execute_agent_task(prompt)
                             result["session"] = session
 
@@ -387,7 +423,7 @@ def run_daemon():
 
     # Preload Kokoro voice engine model in background to avoid latency on first request
     try:
-        from elora.voice import preload_voice_model
+        from elora.skills.voice import preload_voice_model
         threading.Thread(target=preload_voice_model, name="EloraVoicePreloadThread", daemon=True).start()
     except Exception as e:
         logger.error("Failed to initiate voice model preloading: %s", e)

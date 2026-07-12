@@ -74,7 +74,7 @@ def fetch_tech_news(feed_urls: List[str] = None, limit_per_feed: int = None) -> 
     Why: feedparser is an optimized local parser that fetches and parses XML feeds
     without launching heavy headless browser overhead.
     """
-    from elora.config import load_config
+    from elora.core.config import load_config
     config = load_config()
     news_config = config.get("news", {})
     
