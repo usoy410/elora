@@ -54,6 +54,65 @@ HUD_STYLESHEET = """
     QPushButton:pressed {
         background-color: rgba(255, 255, 255, 0.25);
     }
+    
+    /* Control Panel Cyber buttons */
+    QPushButton.control-btn {
+        background-color: rgba(15, 17, 26, 0.4);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 6px;
+        color: #9CA3AF;
+        font-family: 'JetBrains Mono';
+        font-size: 11px;
+        text-align: left;
+        padding: 11px 15px;
+    }
+    QPushButton.control-btn:hover {
+        background-color: rgba(0, 240, 255, 0.1);
+        border-color: rgba(0, 240, 255, 0.4);
+        color: #00F0FF;
+    }
+    QPushButton.control-btn:checked {
+        background-color: rgba(129, 140, 248, 0.15);
+        border-color: rgba(129, 140, 248, 0.6);
+        color: #FFFFFF;
+    }
+
+    /* QProgressBar Cyberpunk style */
+    QProgressBar {
+        background-color: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+        text-align: right;
+        color: rgba(255, 255, 255, 0.75);
+        font-family: 'JetBrains Mono';
+        font-size: 9px;
+        font-weight: bold;
+        height: 14px;
+        padding-right: 4px;
+    }
+    QProgressBar::chunk {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #818CF8, stop:1 #00F0FF);
+        border-radius: 3px;
+    }
+
+    QWidget#SystemMonitorPanel {
+        background-color: rgba(10, 12, 18, 0.6);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+    }
+
+    QWidget#ControlPanel {
+        background-color: rgba(10, 12, 18, 0.6);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+    }
+
+    QWidget#SidebarContainer {
+        background-color: rgba(10, 12, 18, 0.7);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+    }
+
     QComboBox {
         background-color: rgba(15, 17, 26, 0.5);
         border: 1px solid rgba(255, 255, 255, 0.12);

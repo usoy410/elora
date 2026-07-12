@@ -122,3 +122,7 @@ class EloraDaemonClient:
                 self.sock.sendall(payload.encode("utf-8"))
             except Exception as e:
                 logger.error("Failed to send stop command: %s", e)
+
+    def explain_screen(self) -> Dict[str, Any]:
+        """Tells the daemon to capture and explain the screen contents, returning the explanation."""
+        return self.send_cmd({"cmd": "explain_screen"})

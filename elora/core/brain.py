@@ -352,3 +352,75 @@ def query_elora(user_prompt: str, history: List[Dict[str, str]] = None) -> Dict[
             "message": f"Error communicating with Gemini API: {last_exception}"
         }
     }
+
+
+def explain_screen_content(screenshot_path: str = "/tmp/elora_screenshot.png", capture: bool = True) -> str:
+    """
+    Captures a desktop screenshot, sends it to the Gemini API,
+    and returns a conversational explanation of what is currently on the screen.
+    """
+    if capture:
+        from elora.skills.os_control import capture_desktop_screenshot
+        
+        # 1. Capture the system screenshot
+        logger.info("Taking system screenshot for explanation...")
+        success = capture_desktop_screenshot(screenshot_path)
+        if not success or not os.path.exists(screenshot_path):
+            return "Error: Failed to capture system screenshot. Please check display server permissions."
+        
+    # 2. Load API key & config
+    config = load_config()
+    api_key = config.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return "Error: Gemini API key is not configured. Please set the GEMINI_API_KEY environment variable or save it in config.json."
+        
+    primary_model = config.get("model_name", "gemini-2.5-flash")
+    model_candidates = [primary_model, "gemini-2.0-flash"]
+    if primary_model == "gemini-2.0-flash":
+        model_candidates = ["gemini-2.0-flash"]
+        
+    # 3. Read screenshot image bytes
+    try:
+        with open(screenshot_path, "rb") as f:
+            img_bytes = f.read()
+    except Exception as e:
+        logger.error("Failed to read screenshot file: %s", e)
+        return f"Error: Failed to read screenshot file: {e}"
+        
+    # 4. Construct prompt and get custom instructions/personality for context
+    sys_instruction = get_dynamic_system_instruction(config)
+    
+    prompt = (
+        "Analyze the provided screenshot of my desktop screen. "
+        "Describe what is currently visible on the screen. Identify the open windows, applications, "
+        "documents, code, websites, or terminals. Explain what I am working on or looking at. "
+        "Provide a clear, conversational explanation. "
+        "IMPORTANT: Respond in plain, conversational markdown text. Do NOT output a JSON action block."
+    )
+    
+    # 5. Query Gemini
+    client = genai.Client(api_key=api_key)
+    last_exception = None
+    
+    for model in model_candidates:
+        try:
+            logger.info("Sending screenshot explanation query to Gemini model %s...", model)
+            response = client.models.generate_content(
+                model=model,
+                contents=[
+                    types.Part.from_bytes(data=img_bytes, mime_type="image/png"),
+                    types.Part.from_text(text=prompt)
+                ],
+                config=types.GenerateContentConfig(
+                    system_instruction=sys_instruction
+                )
+            )
+            explanation = response.text.strip()
+            if explanation:
+                return explanation
+        except Exception as e:
+            last_exception = e
+            logger.warning("Screen explanation failed with model %s: %s", model, e)
+            
+    return f"Error: Screen explanation failed. Last error: {last_exception}"
+

@@ -28,7 +28,8 @@ def run_agent_loop(
     initial_prompt: str,
     history: List[Dict[str, str]],
     status_callback: Optional[Callable[[Any], None]] = None,
-    confirm_callback: Optional[Callable[[str, Dict[str, Any]], bool]] = None
+    confirm_callback: Optional[Callable[[str, Dict[str, Any]], bool]] = None,
+    screenshot_callback: Optional[Callable[[], bool]] = None
 ) -> Dict[str, Any]:
     """
     Executes the multi-turn ReAct reasoning loop.
@@ -67,8 +68,14 @@ def run_agent_loop(
         
         # Capture a fresh screenshot of the desktop/active window so the model has real-time visual context
         try:
-            from elora.skills.os_control import capture_desktop_screenshot
-            capture_desktop_screenshot()
+            if screenshot_callback:
+                success = screenshot_callback()
+                if not success:
+                    from elora.skills.os_control import capture_desktop_screenshot
+                    capture_desktop_screenshot()
+            else:
+                from elora.skills.os_control import capture_desktop_screenshot
+                capture_desktop_screenshot()
         except Exception as e:
             logger.debug("Failed to capture screenshot: %s", e)
 

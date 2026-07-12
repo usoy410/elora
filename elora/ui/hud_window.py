@@ -19,21 +19,20 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QPainter, QColor, QRadialGradient, QFont, QIcon
 
-# Import from core and skills modules
-from elora.core.brain import query_elora
-from elora.skills.actions import execute_agent_task, open_browser_url
-from elora.skills.news import get_news_summary, get_spoken_news_summary, open_article
-from elora.skills.voice import speak_text
-from elora.core.config import load_config, save_config, set_config_override
+# Import from core modules
+from elora.core.config import load_config, save_config
 
 # Import local ui packages
 from elora.ui.styles import HUD_STYLESHEET, MODAL_OVERLAY_STYLE, MODAL_CARD_STYLE
 from elora.ui.threads import (
     DaemonSTTThread, DaemonQueryThread, NewsFetchThread,
-    TaskListFetchThread, TaskLogFetchThread, TaskCancelThread
+    TaskListFetchThread, TaskLogFetchThread, TaskCancelThread,
+    ScreenExplanationThread, StartupGreetingThread
 )
 from elora.ui.voice_orb import OrbWidget
 from elora.ui.hud_overlay import EloraModalOverlay
+from elora.ui.system_monitor import SystemMonitorWidget
+from elora.ui.cava_visualizer import CavaVisualizer
 
 logger = logging.getLogger("elora.ui.hud_window")
 
@@ -86,131 +85,92 @@ class EloraHUD(QWidget):
 
         # Main Layout
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(40, 40, 40, 40)
+        self.main_layout.setContentsMargins(30, 30, 30, 30)
+
+        # Header Title Bar
+        self.hud_header = QWidget(self)
+        self.hud_header_layout = QHBoxLayout(self.hud_header)
+        self.hud_header_layout.setContentsMargins(10, 0, 10, 0)
+        
+        self.title_layout = QVBoxLayout()
+        self.title_label = QLabel("ELORA", self)
+        self.title_label.setStyleSheet("font-size: 70px; font-weight: 900; letter-spacing: 5px; color: #f9f9f9; font-family: 'anurati';")
+        #self.subtitle_label = QLabel("LINUX DESKTOP ASSISTANT // COGNITIVE CORE v2.0", self)
+        #self.subtitle_label.setStyleSheet("font-size: 9px; font-family: 'JetBrains Mono'; color: #00F0FF; letter-spacing: 1px;")
+        self.title_layout.addWidget(self.title_label)
+        #self.title_layout.addWidget(self.subtitle_label)
+        self.hud_header_layout.addLayout(self.title_layout)
+        
+        self.hud_header_layout.addStretch()
+        self.main_layout.addWidget(self.hud_header)
 
         self.central_card = QWidget(self)
         self.central_card.setObjectName("CentralCard")
         self.main_layout.addWidget(self.central_card)
 
         self.card_layout = QHBoxLayout(self.central_card)
-        self.card_layout.setContentsMargins(20, 20, 20, 20)
-        self.card_layout.setSpacing(15)
+        self.card_layout.setContentsMargins(10, 10, 10, 10)
+        self.card_layout.setSpacing(20)
 
         # =====================================================================
-        # LEFT/MAIN DASHBOARD
+        # COLUMN 1: LEFT PANEL (System Monitor Widget)
         # =====================================================================
-        self.left_dashboard = QWidget(self)
-        self.left_layout = QVBoxLayout(self.left_dashboard)
-        self.left_layout.setContentsMargins(0, 0, 0, 0)
-        self.left_layout.setSpacing(12)
+        self.system_monitor = SystemMonitorWidget(self)
+        self.system_monitor.setFixedWidth(280)
+        self.card_layout.addWidget(self.system_monitor, alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
-        # Top Bar: Title & Navigation Action Buttons
-        self.top_bar = QWidget(self)
-        self.top_bar_layout = QHBoxLayout(self.top_bar)
-        self.top_bar_layout.setContentsMargins(0, 0, 0, 0)
+        # Spacer/stretch pushes left panel and right panel to the margins
+        self.card_layout.addStretch(1)
 
-        self.title_layout = QVBoxLayout()
-        self.title_label = QLabel("ELORA", self)
-        self.title_label.setStyleSheet("font-size: 22px; font-weight: 900; letter-spacing: 1px; color: #FFFFFF;")
-        self.subtitle_label = QLabel("Linux Desktop OS Orchestrator", self)
-        self.subtitle_label.setStyleSheet("font-size: 11px; color: rgba(255, 255, 255, 0.4);")
-        self.title_layout.addWidget(self.title_label)
-        self.title_layout.addWidget(self.subtitle_label)
-        self.top_bar_layout.addLayout(self.title_layout)
+        # =====================================================================
+        # COLUMN 2: CENTER PANEL (Voice Orb & Cava Visualizer)
+        # Parented to top window to remain immune to inner layout height shifts.
+        # =====================================================================
+        self.center_panel = QWidget(self)
+        self.center_layout = QVBoxLayout(self.center_panel)
+        self.center_layout.setContentsMargins(0, 0, 0, 0)
+        self.center_layout.setSpacing(15)
         
-        self.top_bar_layout.addStretch()
+        self.center_layout.addStretch(1)
 
-        # Custom Control Tool Buttons
-        self.btn_tools = QPushButton("Tools", self)
-        self.btn_tools.setIcon(QIcon.fromTheme("system-run"))
-        self.btn_tools.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        
-        self.btn_chat = QPushButton("Chat", self)
-        self.btn_chat.setIcon(QIcon.fromTheme("chat"))
-        self.btn_chat.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        
-        self.btn_settings = QPushButton("Settings", self)
-        self.btn_settings.setIcon(QIcon.fromTheme("preferences-system"))
-        self.btn_settings.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        
-        self.btn_browser = QPushButton("Browser", self)
-        self.btn_browser.setIcon(QIcon.fromTheme("web-browser"))
-        self.btn_browser.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        
-        self.btn_news = QPushButton("News", self)
-        self.btn_news.setIcon(QIcon.fromTheme("news"))
-        self.btn_news.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-
-        self.btn_tasks = QPushButton("Tasks", self)
-        self.btn_tasks.setIcon(QIcon.fromTheme("system-run"))
-        self.btn_tasks.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        
-        self.btn_tools.clicked.connect(lambda: self.toggle_sidebar(1))
-        self.btn_chat.clicked.connect(lambda: self.toggle_sidebar(0))
-        self.btn_settings.clicked.connect(lambda: self.toggle_sidebar(2))
-        self.btn_browser.clicked.connect(lambda: self.toggle_sidebar(3))
-        self.btn_news.clicked.connect(lambda: self.toggle_sidebar(4))
-        self.btn_tasks.clicked.connect(lambda: self.toggle_sidebar(5))
- 
-        self.top_bar_layout.addWidget(self.btn_tools)
-        self.top_bar_layout.addWidget(self.btn_chat)
-        self.top_bar_layout.addWidget(self.btn_tasks)
-        self.top_bar_layout.addWidget(self.btn_news)
-        self.top_bar_layout.addWidget(self.btn_settings)
-        self.top_bar_layout.addWidget(self.btn_browser)
- 
-        self.left_layout.addWidget(self.top_bar)
-
-        # Telemetry Row (System stats)
-        self.telemetry_frame = QFrame(self)
-        self.telemetry_frame.setStyleSheet("background-color: rgba(15, 17, 26, 0.5); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px;")
-        self.telemetry_layout = QHBoxLayout(self.telemetry_frame)
-        self.telemetry_layout.setContentsMargins(16, 12, 16, 12)
-        
-        self.lbl_cpu = QLabel("CPU Load: --", self)
-        self.lbl_cpu.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 11px; color: rgba(255,255,255,0.7);")
-        self.lbl_ram = QLabel("RAM: --", self)
-        self.lbl_ram.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 11px; color: rgba(255,255,255,0.7);")
-        self.lbl_tasks = QLabel("Background Tasks: --", self)
-        self.lbl_tasks.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 11px; color: rgba(255,255,255,0.7);")
-
-        self.telemetry_layout.addWidget(self.lbl_cpu)
-        self.telemetry_layout.addWidget(self.lbl_ram)
-        self.telemetry_layout.addWidget(self.lbl_tasks)
-        
-        self.left_layout.addWidget(self.telemetry_frame, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.left_layout.addStretch(1)
-
-        # Center AI Orb section
-        self.orb_section = QWidget(self)
-        self.orb_layout = QVBoxLayout(self.orb_section)
+        # Voice Orb
         self.orb = OrbWidget(self)
-        self.orb_layout.addWidget(self.orb, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.center_layout.addWidget(self.orb, alignment=Qt.AlignmentFlag.AlignCenter)
         
+        # State display indicator label
         self.state_label = QLabel("[ HOLD ALT TO TALK ]", self)
-        self.state_label.setStyleSheet("color: rgba(255, 255, 255, 0.4); font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; letter-spacing: 2px;")
-        self.orb_layout.addWidget(self.state_label, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.left_layout.addWidget(self.orb_section, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.state_label.setStyleSheet("color: rgba(255, 255, 255, 0.8); font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; letter-spacing: 2px;")
+        self.center_layout.addWidget(self.state_label, alignment=Qt.AlignmentFlag.AlignCenter)
+        
+        # Cava Audio Visualizer
+        self.cava = CavaVisualizer(self)
+        self.center_layout.addWidget(self.cava, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self.left_layout.addStretch(1)
+        self.center_layout.addStretch(1)
 
+        # Push to talk hotkey tip
         self.ptt_tip = QLabel("[ Hold ALT to Speak ]   •   [ Press ESC to Exit ]", self)
-        self.ptt_tip.setStyleSheet("color: rgba(255, 255, 255, 0.3); font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold;")
-        self.left_layout.addWidget(self.ptt_tip, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        self.card_layout.addWidget(self.left_dashboard)
+        self.ptt_tip.setStyleSheet("color: rgba(255, 255, 255, 0.5); font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold;")
+        self.center_layout.addWidget(self.ptt_tip, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # =====================================================================
-        # COLLAPSIBLE SIDEBAR PANEL (Right)
+        # COLUMN 3: RIGHT PANEL (Sidebar drawer + Vertical Action Panel)
         # =====================================================================
-        self.sidebar_widget = QWidget(self)
-        self.sidebar_widget.setObjectName("SidebarWidget")
-        self.sidebar_widget.setFixedWidth(380)
+        self.right_panel = QWidget(self)
+        self.right_layout = QHBoxLayout(self.right_panel)
+        self.right_layout.setContentsMargins(0, 0, 0, 0)
+        self.right_layout.setSpacing(10)
+        self.right_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+        # Sidebar container wrapping self.stacked_widget (hidden by default)
+        self.sidebar_widget = QFrame(self)
+        self.sidebar_widget.setObjectName("SidebarContainer")
+        self.sidebar_widget.setFixedSize(380, 600)
         self.sidebar_layout = QVBoxLayout(self.sidebar_widget)
-        self.sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        self.sidebar_layout.setContentsMargins(15, 15, 15, 15)
         self.sidebar_layout.setSpacing(10)
-
-        # Sidebar Title & Close Action
+        
+        # Sidebar Header: Title and Close button
         self.sidebar_header = QWidget(self)
         self.sidebar_header_layout = QHBoxLayout(self.sidebar_header)
         self.sidebar_header_layout.setContentsMargins(0, 0, 0, 0)
@@ -227,7 +187,56 @@ class EloraHUD(QWidget):
         self.btn_close_sidebar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_close_sidebar.clicked.connect(self.close_sidebar)
         self.sidebar_header_layout.addWidget(self.btn_close_sidebar)
+        
         self.sidebar_layout.addWidget(self.sidebar_header)
+
+        # Control Panel containing vertical navigation buttons
+        self.control_panel_widget = QFrame(self)
+        self.control_panel_widget.setObjectName("ControlPanel")
+        self.control_panel_widget.setFixedSize(150, 380)
+        self.control_panel_layout = QVBoxLayout(self.control_panel_widget)
+        self.control_panel_layout.setContentsMargins(10, 15, 10, 15)
+        self.control_panel_layout.setSpacing(8)
+
+        # Header for control panel
+        self.lbl_cp_title = QLabel("NAV MODULES", self)
+        self.lbl_cp_title.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4); text-align: center; margin-bottom: 5px;")
+        self.control_panel_layout.addWidget(self.lbl_cp_title, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Buttons
+        self.btn_chat = QPushButton("// 01 CHAT", self)
+        self.btn_tools = QPushButton("// 02 TOOLS", self)
+        self.btn_tasks = QPushButton("// 06 TASKS", self)
+        self.btn_news = QPushButton("// 05 NEWS", self)
+        self.btn_settings = QPushButton("// 03 CONFIG", self)
+        self.btn_browser = QPushButton("// 04 BROWSER", self)
+
+        # Setup checkable styling and focus
+        self.nav_buttons = [
+            self.btn_chat,       # index 0
+            self.btn_tools,      # index 1
+            self.btn_settings,   # index 2
+            self.btn_browser,    # index 3
+            self.btn_news,       # index 4
+            self.btn_tasks       # index 5
+        ]
+
+        for btn in self.nav_buttons:
+            btn.setCheckable(True)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn.setProperty("class", "control-btn")
+            self.control_panel_layout.addWidget(btn)
+
+        self.btn_chat.clicked.connect(lambda: self.toggle_sidebar(0))
+        self.btn_tools.clicked.connect(lambda: self.toggle_sidebar(1))
+        self.btn_settings.clicked.connect(lambda: self.toggle_sidebar(2))
+        self.btn_browser.clicked.connect(lambda: self.toggle_sidebar(3))
+        self.btn_news.clicked.connect(lambda: self.toggle_sidebar(4))
+        self.btn_tasks.clicked.connect(lambda: self.toggle_sidebar(5))
+
+        self.right_layout.addWidget(self.sidebar_widget)
+        self.right_layout.addWidget(self.control_panel_widget)
+        self.card_layout.addWidget(self.right_panel, alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         # Stacked widgets representing different tabs
         self.stacked_widget = QStackedWidget(self)
@@ -291,6 +300,23 @@ class EloraHUD(QWidget):
         lbl_cmd_desc.setWordWrap(True)
         self.tools_layout.addWidget(lbl_cmd_desc)
 
+        # Add Desktop Vision Explanation capability
+        lbl_vision_header = QLabel("DESKTOP VISION CAPABILITIES", self)
+        lbl_vision_header.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5); margin-top: 15px;")
+        self.tools_layout.addWidget(lbl_vision_header)
+
+        self.btn_explain_screen = QPushButton("Explain Current Screen", self)
+        self.btn_explain_screen.setIcon(QIcon.fromTheme("view-preview"))
+        self.btn_explain_screen.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_explain_screen.setStyleSheet("background-color: rgba(129, 140, 248, 0.12); border: 1px solid rgba(129, 140, 248, 0.3); color: #818CF8; font-weight: bold; padding: 6px; border-radius: 4px;")
+        self.btn_explain_screen.clicked.connect(self.trigger_screen_explanation)
+        self.tools_layout.addWidget(self.btn_explain_screen)
+
+        lbl_explain_desc = QLabel("Captures a system screenshot and explains what is currently visible on your screen using Gemini's vision capabilities.", self)
+        lbl_explain_desc.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 11px; padding-left: 5px;")
+        lbl_explain_desc.setWordWrap(True)
+        self.tools_layout.addWidget(lbl_explain_desc)
+
         self.tools_layout.addStretch()
         self.stacked_widget.addWidget(self.page_tools)
 
@@ -302,7 +328,7 @@ class EloraHUD(QWidget):
         self.settings_layout.setContentsMargins(5, 5, 5, 5)
         self.settings_layout.setSpacing(12)
 
-        lbl_voice = QLabel("VOICE", self)
+        lbl_voice = QLabel("VOICE MODEL", self)
         lbl_voice.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
         self.settings_layout.addWidget(lbl_voice)
         
@@ -318,6 +344,39 @@ class EloraHUD(QWidget):
         if idx != -1:
             self.cmb_voice.setCurrentIndex(idx)
         self.settings_layout.addWidget(self.cmb_voice)
+
+        lbl_voice_provider = QLabel("VOICE PROVIDER", self)
+        lbl_voice_provider.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
+        self.settings_layout.addWidget(lbl_voice_provider)
+
+        self.cmb_voice_provider = QComboBox(self)
+        self.cmb_voice_provider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.cmb_voice_provider.addItem("Local (Offline ONNX)", "local")
+        self.cmb_voice_provider.addItem("Cloud (Hugging Face Space)", "cloud")
+        active_provider = voice_cfg.get("provider", "local")
+        idx_prov = self.cmb_voice_provider.findData(active_provider)
+        if idx_prov != -1:
+            self.cmb_voice_provider.setCurrentIndex(idx_prov)
+        self.settings_layout.addWidget(self.cmb_voice_provider)
+
+        self.lbl_hf_space_url = QLabel("HUGGING FACE SPACE URL", self)
+        self.lbl_hf_space_url.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
+        self.settings_layout.addWidget(self.lbl_hf_space_url)
+
+        self.txt_hf_space_url = QLineEdit(self)
+        self.txt_hf_space_url.setPlaceholderText("https://username-space.hf.space")
+        self.txt_hf_space_url.setText(voice_cfg.get("hf_space_url", ""))
+        self.settings_layout.addWidget(self.txt_hf_space_url)
+
+        self.lbl_hf_token = QLabel("HUGGING FACE TOKEN (OPTIONAL)", self)
+        self.lbl_hf_token.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
+        self.settings_layout.addWidget(self.lbl_hf_token)
+
+        self.txt_hf_token = QLineEdit(self)
+        self.txt_hf_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self.txt_hf_token.setPlaceholderText("Enter HF User Token if private...")
+        self.txt_hf_token.setText(voice_cfg.get("hf_token", ""))
+        self.settings_layout.addWidget(self.txt_hf_token)
 
         lbl_stt_model = QLabel("SPEECH RECOGNITION (STT) ENGINE", self)
         lbl_stt_model.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
@@ -404,6 +463,9 @@ class EloraHUD(QWidget):
         
         self.cmb_personality.currentIndexChanged.connect(self.on_personality_changed)
         self.on_personality_changed()
+
+        self.cmb_voice_provider.currentIndexChanged.connect(self.on_voice_provider_changed)
+        self.on_voice_provider_changed()
 
         # Safe Gate checkbox
         self.chk_safe_gate = QCheckBox("Safe Gate Mode (Approve dangerous commands)", self)
@@ -562,26 +624,13 @@ class EloraHUD(QWidget):
         self.browser_refresh_timer.start(2000)
 
         self.sidebar_layout.addWidget(self.stacked_widget)
-        
-        # Modal overlay card setup
-        self.modal_overlay = EloraModalOverlay(self)
-        self.modal_overlay.card_layout.addWidget(self.sidebar_widget)
-        self.modal_overlay.close_callback = self.close_sidebar
-        self.modal_overlay.hide()
-
-        modal_shadow = QGraphicsDropShadowEffect(self)
-        modal_shadow.setBlurRadius(30)
-        modal_shadow.setColor(QColor(0, 0, 0, 180))
-        modal_shadow.setOffset(0, 10)
-        self.modal_overlay.modal_card.setGraphicsEffect(modal_shadow)
-
         self.sidebar_widget.hide()
         self.showMaximized()
+        self.reposition_center_panel()
 
         self.telemetry_timer = QTimer(self)
-        self.telemetry_timer.timeout.connect(self.update_system_telemetry)
+        self.telemetry_timer.timeout.connect(self.update_telemetry_loop)
         self.telemetry_timer.start(1000)
-        self.update_system_telemetry()
 
         QTimer.singleShot(800, self.trigger_startup_greeting)
 
@@ -607,24 +656,42 @@ class EloraHUD(QWidget):
     def center_on_screen(self):
         pass
 
+    def reposition_center_panel(self):
+        """Mathematically positions center_panel in the exact center of the maximized window."""
+        if hasattr(self, "center_panel") and self.center_panel:
+            window_rect = self.rect()
+            panel_w = 320
+            panel_h = 340
+            self.center_panel.setFixedSize(panel_w, panel_h)
+            cx = (window_rect.width() - panel_w) // 2
+            
+            # Center vertically relative to content area (accounting for title header + margins)
+            header_h = 60
+            margin_top = 30
+            content_y = header_h + margin_top
+            content_h = window_rect.height() - content_y - 30 # 30px bottom margin
+            
+            cy = content_y + (content_h - panel_h) // 2
+            self.center_panel.move(cx, cy)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, "modal_overlay") and self.modal_overlay:
-            self.modal_overlay.setGeometry(self.rect())
+        self.reposition_center_panel()
 
     def toggle_sidebar(self, tab_index: int):
         titles = ["Conversation", "Tools", "Settings", "Browser Preview", "News Telemetry", "Active Tasks"]
         self.sidebar_title.setText(titles[tab_index])
         
+        # Sync navigation check states
+        for i, btn in enumerate(self.nav_buttons):
+            btn.setChecked(i == tab_index and self.active_sidebar_tab != tab_index)
+            
         if self.active_sidebar_tab == tab_index:
             self.close_sidebar()
         else:
             self.active_sidebar_tab = tab_index
             self.stacked_widget.setCurrentIndex(tab_index)
             self.sidebar_widget.show()
-            self.modal_overlay.setGeometry(self.rect())
-            self.modal_overlay.show()
-            self.modal_overlay.raise_()
             
             if tab_index == 4:
                 self.news_list.clear()
@@ -636,52 +703,22 @@ class EloraHUD(QWidget):
     def close_sidebar(self):
         self.active_sidebar_tab = -1
         self.sidebar_widget.hide()
-        self.modal_overlay.hide()
+        for btn in self.nav_buttons:
+            btn.setChecked(False)
 
-    def update_system_telemetry(self):
-        ram_text = "RAM: Unknown"
-        try:
-            with open("/proc/meminfo", "r") as f:
-                lines = f.readlines()
-            mem_total = 0
-            mem_avail = 0
-            for line in lines:
-                if line.startswith("MemTotal:"):
-                    mem_total = int(line.split()[1])
-                elif line.startswith("MemAvailable:"):
-                    mem_avail = int(line.split()[1])
-            if mem_avail == 0:
-                for line in lines:
-                    if line.startswith("MemFree:"):
-                        mem_avail = int(line.split()[1])
-            used = mem_total - mem_avail
-            ram_text = f"RAM: {used / (1024*1024):.1f}G / {mem_total / (1024*1024):.1f}G ({used*100/mem_total:.0f}%)"
-        except Exception:
-            pass
-        self.lbl_ram.setText(ram_text)
-
-        cpu_text = "CPU Load: Unknown"
-        try:
-            with open("/proc/loadavg", "r") as f:
-                load = f.read().split()
-            cpu_text = f"CPU Load: {load[0]} {load[1]}"
-        except Exception:
-            pass
-        self.lbl_cpu.setText(cpu_text)
-
-        tasks_count = 0
-        try:
-            output = subprocess.check_output(["tmux", "list-sessions"], stderr=subprocess.DEVNULL).decode()
-            tasks_count = len([line for line in output.strip().split("\n") if line.strip().startswith("elora-dev")])
-        except Exception:
-            pass
-        self.lbl_tasks.setText(f"Active Tasks: {tasks_count}")
-
+    def update_telemetry_loop(self):
         if self.active_sidebar_tab == 5:
             self.update_tasks_periodically()
 
     def on_speed_changed(self, value: int):
         self.lbl_speed_val.setText(f"SPEED: {value/100:.1f}x")
+
+    def on_voice_provider_changed(self):
+        is_cloud = self.cmb_voice_provider.currentData() == "cloud"
+        self.lbl_hf_space_url.setVisible(is_cloud)
+        self.txt_hf_space_url.setVisible(is_cloud)
+        self.lbl_hf_token.setVisible(is_cloud)
+        self.txt_hf_token.setVisible(is_cloud)
 
     def on_personality_changed(self):
         is_other = self.cmb_personality.currentData() == "other"
@@ -698,6 +735,57 @@ class EloraHUD(QWidget):
         }
         save_config(updates)
 
+    def trigger_screen_explanation(self):
+        """
+        Triggers screen screenshot capture and invokes the vision model explanation
+        flow asynchronously via a background ScreenExplanationThread.
+        """
+        self.console_output.append("<br><span style='color: #818CF8;'>System:</span> Capturing system screenshot and querying vision model...")
+        self.update_state_ui("thinking", "ANALYZING...")
+        self.btn_explain_screen.setEnabled(False)
+        
+        # Hide the HUD overlay to capture a clean desktop screenshot underneath
+        self.hide()
+        QApplication.instance().processEvents()
+        
+        # Wait a small delay to allow the compositor to repaint the screen without the HUD
+        import time
+        time.sleep(0.2)
+        
+        # Take the screenshot on the client side
+        try:
+            from elora.skills.os_control import capture_desktop_screenshot
+            capture_desktop_screenshot()
+        except Exception as e:
+            logger.error("Failed to capture screen: %s", e)
+            
+        # Restore HUD window visibility
+        self.show()
+        QApplication.instance().processEvents()
+        
+        self.explain_thread = ScreenExplanationThread()
+        self.explain_thread.explanation_finished.connect(self.handle_screen_explanation_response)
+        self.explain_thread.start()
+
+    def handle_screen_explanation_response(self, res: dict):
+        """
+        Processes the screen explanation results from the daemon thread.
+        Appends the conversational explanation to the chat console and updates session history.
+        """
+        self.btn_explain_screen.setEnabled(True)
+        self.reset_to_idle()
+        
+        status = res.get("status")
+        if status == "explanation":
+            text = res.get("text", "")
+            self.console_output.append(f"<span style='color: #EC4899;'>Elora:</span> {text}")
+            self.session_history.append({"role": "assistant", "content": text})
+            if len(self.session_history) > 20:
+                self.session_history.pop(0)
+        else:
+            err_msg = res.get("message", "Unknown error")
+            self.console_output.append(f"<span style='color: #EF4444;'>Error:</span> {err_msg}")
+
     def save_settings(self):
         selected_voice = self.cmb_voice.currentData()
         selected_speed = self.sld_speed.value() / 100.0
@@ -705,11 +793,17 @@ class EloraHUD(QWidget):
         selected_personality = self.cmb_personality.currentData()
         custom_personality = self.txt_custom_personality.text().strip()
         api_key = self.txt_api_key.text().strip()
+        selected_provider = self.cmb_voice_provider.currentData()
+        hf_space_url = self.txt_hf_space_url.text().strip()
+        hf_token = self.txt_hf_token.text().strip()
 
         updates = {
             "voice": {
                 "voice_name": selected_voice,
-                "speed": selected_speed
+                "speed": selected_speed,
+                "provider": selected_provider,
+                "hf_space_url": hf_space_url,
+                "hf_token": hf_token
             },
             "stt": {
                 "model_name": selected_stt
@@ -773,6 +867,7 @@ class EloraHUD(QWidget):
     def update_state_ui(self, state: str, text: str):
         self.state_label.setText(text)
         self.orb.set_state(state)
+        self.cava.set_state(state)
         
         if state == "listening":
             self.state_label.setStyleSheet("color: #EC4899; font-family: 'JetBrains Mono'; font-size: 13px; font-weight: bold; letter-spacing: 2px;")
@@ -793,7 +888,7 @@ class EloraHUD(QWidget):
                         self.start_voice_recording()
                 return True
             elif event.key() == Qt.Key.Key_Escape:
-                if hasattr(self, "modal_overlay") and self.modal_overlay.isVisible():
+                if self.active_sidebar_tab != -1:
                     self.close_sidebar()
                     return True
                 if self.record_process:
@@ -868,8 +963,36 @@ class EloraHUD(QWidget):
         self.query_thread.status_changed.connect(self.handle_status_change)
         self.query_thread.telemetry_received.connect(self.handle_telemetry_received)
         self.query_thread.confirm_requested.connect(self.handle_confirm_request)
+        self.query_thread.screenshot_requested.connect(self.handle_screenshot_request)
         self.query_thread.query_finished.connect(self.handle_brain_response)
         self.query_thread.start()
+
+    @Slot()
+    def handle_screenshot_request(self):
+        """
+        Handles screenshot requests from the query thread by hiding the HUD overlay,
+        capturing the desktop screenshot, and notifying the thread to resume.
+        """
+        # Hide HUD to capture clean user desktop screenshot
+        self.hide()
+        QApplication.instance().processEvents()
+        
+        import time
+        time.sleep(0.2)
+        
+        success = False
+        try:
+            from elora.skills.os_control import capture_desktop_screenshot
+            success = capture_desktop_screenshot()
+        except Exception as e:
+            logger.error("Failed to capture desktop screenshot on request: %s", e)
+            
+        self.show()
+        QApplication.instance().processEvents()
+        
+        # Notify query thread
+        self.query_thread.screenshot_success = success
+        self.query_thread.screenshot_event.set()
 
     @Slot(str)
     def handle_status_change(self, status_text: str):
@@ -1002,6 +1125,7 @@ class EloraHUD(QWidget):
             mode = args.get("mode", "skim")
             if mode == "skim":
                 self.console_output.append("<span style='color: #818CF8;'>Elora:</span> Fetching top headlines...")
+                from elora.skills.news import get_news_summary
                 summary = get_news_summary()
                 self.console_output.append(f"<pre style='color: #D1D5DB;'>{summary}</pre>")
                 self.load_news_skimmer()
@@ -1069,87 +1193,32 @@ class EloraHUD(QWidget):
         self.update_state_ui("idle", "[ HOLD ALT TO TALK ]")
     def trigger_startup_greeting(self):
         """
-        Determines the startup behavior:
+        Determines the startup behavior asynchronously:
         - If there is an active running background task, updates the user with its status and latest logs.
         - Otherwise, greets the user with a fresh greeting and clears historical context.
         """
-        from elora.ipc.daemon_client import EloraDaemonClient
-        client = EloraDaemonClient()
+        self.update_state_ui("thinking", "INITIALIZING...")
+        self.console_output.clear()
+        self.console_output.append("<span style='color: #818CF8;'>Elora:</span> Initializing cognitive modules...")
         
-        # 1. Fetch active tasks from the daemon
-        running_tasks = []
-        try:
-            res = client.send_cmd({"cmd": "list_tasks"})
-            if res.get("status") == "tasks_list":
-                running_tasks = res.get("tasks", [])
-        except Exception as e:
-            logger.error("Failed to query tasks list for greeting: %s", e)
+        self.startup_thread = StartupGreetingThread(self.config)
+        self.startup_thread.greeting_finished.connect(self.handle_startup_greeting_finished)
+        self.startup_thread.finished.connect(self.startup_thread.deleteLater)
+        self.startup_thread.start()
 
-        # Filter to actual running sessions
-        active_running = [t for t in running_tasks if t.get("status") == "running"]
-
-        if active_running:
-            # We have active running background tasks! Let's update the user.
-            task = active_running[0] # Focus on the first active running task
-            session = task.get("session")
-            prompt = task.get("prompt", "")
-            started_at = task.get("started_at", 0.0)
-            
-            latest_line = ""
-            try:
-                log_res = client.send_cmd({"cmd": "get_task_log", "session": session})
-                if log_res.get("status") == "task_log":
-                    raw_log = log_res.get("log", "")
-                    from elora.skills.skills import strip_ansi_codes
-                    cleaned_log = strip_ansi_codes(raw_log).strip()
-                    if cleaned_log:
-                        # Get the last 2 non-empty lines of the log
-                        lines = [l.strip() for l in cleaned_log.split("\n") if l.strip()]
-                        if lines:
-                            latest_line = lines[-1]
-                            if len(lines) > 1 and (latest_line.startswith("[") or len(latest_line) < 15):
-                                latest_line = f"{lines[-2]} | {latest_line}"
-            except Exception as e:
-                logger.error("Failed to fetch log for greeting update: %s", e)
-
-            import time
-            elapsed = ""
-            if started_at > 0:
-                sec = int(time.time() - started_at)
-                if sec < 60:
-                    elapsed = f"{sec} seconds"
-                elif sec < 3600:
-                    elapsed = f"{sec//60} minutes and {sec%60} seconds"
-                else:
-                    elapsed = f"{sec//3600} hours and {(sec%3600)//60} minutes"
-            else:
-                elapsed = "some time"
-
-            # Clean and truncate prompt for voice / output
-            voice_prompt = prompt[:80] + "..." if len(prompt) > 80 else prompt
-            
-            if len(active_running) > 1:
-                update_text = f"I am currently running {len(active_running)} background tasks. The primary task is: '{voice_prompt}', started {elapsed} ago."
-            else:
-                update_text = f"I am currently running the task: '{voice_prompt}', started {elapsed} ago."
-                
-            if latest_line:
-                # Truncate log snippet to keep speech short
-                speech_latest = latest_line[:120] + "..." if len(latest_line) > 120 else latest_line
-                update_text += f" The latest progress is: {speech_latest}"
-            else:
-                update_text += " No progress logs are available yet."
-
-            # Update session history and UI console
+    def handle_startup_greeting_finished(self, result: dict):
+        gtype = result.get("type")
+        if gtype == "active_tasks":
+            update_text = result.get("update_text", "")
             self.session_history = [{"role": "assistant", "content": update_text}]
             self.console_output.clear()
             self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {update_text}")
-            
             self.update_state_ui("thinking", "SYNTHESIZING...")
 
             import threading
             def speak_update_bg():
                 try:
+                    from elora.ipc.daemon_client import EloraDaemonClient
                     c = EloraDaemonClient()
                     # Sync history in daemon to match
                     c.send_cmd({"cmd": "reset_history"})
@@ -1165,73 +1234,33 @@ class EloraHUD(QWidget):
                     self.speaking_state_signal.emit(False)
 
             threading.Thread(target=speak_update_bg, daemon=True).start()
-            return
+            
+        else: # fresh_greeting
+            local_greeting = result.get("greeting", "")
+            self.session_history = [{"role": "assistant", "content": local_greeting}]
+            self.console_output.clear()
+            self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {local_greeting}")
+            self.update_state_ui("thinking", "SYNTHESIZING...")
 
-        # 2. No active running tasks, proceed with fresh greeting and reset history
-        user_name = "boss"
-        try:
-            from elora.core.memory import is_memory_available, search_memory
-            avail, _ = is_memory_available()
-            if avail:
-                results = search_memory("my name is", top_k=1, threshold=0.5)
-                if not results:
-                    results = search_memory("call me", top_k=1, threshold=0.5)
-                if results:
-                    text = results[0]["text"]
-                    text_lower = text.lower()
-                    for pattern in ("name is", "call me"):
-                        if pattern in text_lower:
-                            extracted = text[text_lower.index(pattern) + len(pattern):].strip()
-                            extracted = extracted.rstrip(".").rstrip("!").strip()
-                            if extracted:
-                                user_name = extracted
-                                break
-        except Exception as e:
-            logger.error("Failed to recall user name from memory: %s", e)
+            import threading
+            def play_greeting_bg():
+                try:
+                    from elora.ipc.daemon_client import EloraDaemonClient
+                    c = EloraDaemonClient()
+                    c.send_cmd({"cmd": "reset_history"})
+                    c.send_cmd({
+                        "cmd": "add_history",
+                        "role": "assistant",
+                        "content": json.dumps({"action": "reply", "arguments": {"message": local_greeting}})
+                    })
+                    c.send_cmd({"cmd": "speak", "text": local_greeting})
+                    self.speaking_state_signal.emit(True)
+                except Exception as bg_err:
+                    logger.error("Failed to play startup greeting in background thread: %s", bg_err)
+                    self.speaking_state_signal.emit(False)
 
-        from datetime import datetime
-        hour = datetime.now().hour
-        if hour < 12:
-            time_of_day = "morning"
-        elif hour < 17:
-            time_of_day = "afternoon"
-        else:
-            time_of_day = "evening"
+            threading.Thread(target=play_greeting_bg, daemon=True).start()
 
-        import random
-        greetings = [
-            f"Good {time_of_day} {user_name}, Elora standing by.",
-            f"Hello {user_name}. Systems are green and ready.",
-            f"Welcome back {user_name}. What is your command?",
-            f"System initialized. How can I assist you this {time_of_day}, {user_name}?",
-            f"Greetings {user_name}. Standing by for instructions.",
-            f"Elora online, {user_name}. What shall we work on?"
-        ]
-        local_greeting = random.choice(greetings)
-
-        self.session_history = [{"role": "assistant", "content": local_greeting}]
-        self.console_output.clear()
-        self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {local_greeting}")
-        
-        self.update_state_ui("thinking", "SYNTHESIZING...")
-
-        import threading
-        def play_greeting_bg():
-            try:
-                c = EloraDaemonClient()
-                c.send_cmd({"cmd": "reset_history"})
-                c.send_cmd({
-                    "cmd": "add_history",
-                    "role": "assistant",
-                    "content": json.dumps({"action": "reply", "arguments": {"message": local_greeting}})
-                })
-                c.send_cmd({"cmd": "speak", "text": local_greeting})
-                self.speaking_state_signal.emit(True)
-            except Exception as bg_err:
-                logger.error("Failed to play startup greeting in background thread: %s", bg_err)
-                self.speaking_state_signal.emit(False)
-
-        threading.Thread(target=play_greeting_bg, daemon=True).start()
 
     def load_news_skimmer(self):
         self.news_list.clear()
@@ -1265,6 +1294,7 @@ class EloraHUD(QWidget):
         link = item.data(Qt.ItemDataRole.UserRole)
         if link:
             self.console_output.append(f"<span style='color: #10B981;'>System:</span> Opening link in web browser...")
+            from elora.skills.actions import open_browser_url
             open_browser_url(link)
 
     def refresh_tasks_list(self):

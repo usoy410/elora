@@ -339,6 +339,20 @@ def main() -> None:
             start_hud()
             return
             
+        # Check if the user wants to explain the screen contents
+        if sys.argv[1] == "--explain-screen":
+            from elora.core.brain import explain_screen_content
+            from elora.skills.voice import speak_text
+            
+            print("\nElora: Capturing and analyzing screen...")
+            explanation = explain_screen_content()
+            
+            print(f"\nElora:\n{explanation}\n")
+            
+            # Speak it if voice feedback is enabled
+            speak_text(explanation)
+            return
+            
         prompt = " ".join(sys.argv[1:])
         execute_single_prompt(prompt)
         return

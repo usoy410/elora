@@ -109,9 +109,15 @@ uv run python main.py --voice
 ```
 
 ### 5. Centralized HUD Dashboard Mode
-Launch a gorgeous, transparent, maximized graphical overlay featuring a glassmorphic floating controller and centered voice pulse orb. Access chat logs, tools, settings, and news feeds via centered modal overlay panels. Hold down the `Alt` key to speak, release it to execute, and press `Esc` to close a modal or exit:
+Launch a gorgeous, transparent, maximized graphical overlay featuring a modular Left-Center-Right dashboard. The system monitor progress bars occupy the left panel, the animated voice orb and interactive Cava audio visualizer float in the center, and a vertical command deck with a collapsible tab drawer (Chat, Tools, Settings, Tasks, News, Browser) handles navigation on the right. Hold down the `Alt` key to speak, release it to execute, and press `Esc` to collapse an open sidebar drawer or exit:
 ```bash
 uv run python main.py --hud
+```
+
+### 6. Screen Explanation Mode
+Take a screenshot of your active desktop workspace and generate a conversational explanation of what is currently on the screen using Gemini's visual capabilities:
+```bash
+uv run python main.py --explain-screen
 ```
 
 ---
@@ -126,7 +132,10 @@ Elora settings are stored dynamically in `~/.config/elora/config.json`. You can 
   "gemini_api_key": "YOUR_GEMINI_API_KEY",
   "voice": {
     "enabled": true,
-    "voice_name": "Aoede",
+    "provider": "cloud",
+    "hf_space_url": "https://username-space.hf.space",
+    "hf_token": "YOUR_HF_TOKEN",
+    "voice_name": "af_heart",
     "speed": 1.0
   },
   "stt": {
@@ -136,8 +145,17 @@ Elora settings are stored dynamically in `~/.config/elora/config.json`. You can 
 ```
 
 *   **gemini_api_key**: Your personal Google AI Studio API key.
-*   **voice.voice_name**: Sets the active speech voice (`Aoede`, `Puck`, `Charon`, `Kore`, or `Fenrir`).
+*   **voice.enabled**: Toggles voice feedback.
+*   **voice.provider**: Set to `cloud` to use a cloud-hosted Hugging Face Space for Kokoro speech synthesis, or `local` to run it offline.
+*   **voice.hf_space_url**: The endpoint URL of your Hugging Face space.
+*   **voice.hf_token**: (Optional) Hugging Face user access token.
+*   **voice.voice_name**: Sets the active speech voice (e.g. `af_heart` for Kokoro).
+*   **voice.speed**: The playback speed multiplier.
 *   **stt.model_name**: Set to `gemini` for cloud speech-to-text.
+
+### Hugging Face Space Warmup
+Free Hugging Face Spaces on default tiers automatically suspend after 48 hours of inactivity. To prevent the cold-start delay from affecting your first speech request, the Elora daemon automatically initiates an asynchronous warmup routine for your Space in the background when the daemon boots or receives a preload request.
+
 
 ---
 

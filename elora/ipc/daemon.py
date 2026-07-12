@@ -20,10 +20,23 @@ from typing import Optional, Dict, Any, List
 # Ensure package directory is on the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from elora.skills.voice import speak_text
-from elora.core.brain import query_elora
-from elora.core.config import load_config
-from elora.skills.news import get_spoken_news_summary, fetch_tech_news, open_article
+# Deferred imports helper wrappers to avoid importing heavy libraries on daemon launch.
+# This makes the Unix socket creation and bind process instant.
+def speak_text(text: str, audio_bytes = None, mime_type = None) -> None:
+    from elora.skills.voice import speak_text as _speak_text
+    _speak_text(text, audio_bytes, mime_type)
+
+def fetch_tech_news():
+    from elora.skills.news import fetch_tech_news as _fetch_tech_news
+    return _fetch_tech_news()
+
+def get_spoken_news_summary():
+    from elora.skills.news import get_spoken_news_summary as _get_spoken_news_summary
+    return _get_spoken_news_summary()
+
+def open_article(index):
+    from elora.skills.news import open_article as _open_article
+    return _open_article(index)
 
 # Setup daemon logging
 logging.basicConfig(
@@ -285,8 +298,31 @@ def handle_client(conn: socket.socket):
                                 logger.error("Error waiting for user confirmation via IPC: %s", e)
                                 return False
 
+                        def screenshot_cb() -> bool:
+                            try:
+                                # Send screenshot request over the socket
+                                payload = {"status": "screenshot_request"}
+                                conn.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+                                
+                                # Read response synchronously
+                                response_bytes = b""
+                                while b"\n" not in response_bytes:
+                                    chunk = conn.recv(1024)
+                                    if not chunk:
+                                        return False
+                                    response_bytes += chunk
+                                    
+                                line = response_bytes.split(b"\n")[0].decode("utf-8").strip()
+                                resp = json.loads(line)
+                                if resp.get("cmd") == "screenshot_response":
+                                    return resp.get("success", False)
+                                return False
+                            except Exception as e:
+                                logger.error("Error waiting for screenshot response via IPC: %s", e)
+                                return False
+
                         from elora.core.agent import run_agent_loop
-                        result = run_agent_loop(text, effective_history, status_cb, confirm_cb)
+                        result = run_agent_loop(text, effective_history, status_cb, confirm_cb, screenshot_cb)
                         action = result.get("action")
                         args = result.get("arguments", {})
                         
@@ -452,6 +488,17 @@ def handle_client(conn: socket.socket):
                         text = payload.get("text", "")
                         speak_text(text)
                         conn.sendall(b'{"status": "done"}\n')
+
+                    elif cmd == "explain_screen":
+                        from elora.core.brain import explain_screen_content
+                        explanation = explain_screen_content(capture=False)
+                        speak_text(explanation)
+                        # Add explanation to session history as assistant response
+                        add_to_history("assistant", json.dumps({
+                            "action": "reply",
+                            "arguments": {"message": explanation}
+                        }))
+                        conn.sendall((json.dumps({"status": "explanation", "text": explanation}) + "\n").encode("utf-8"))
 
                     elif cmd == "is_speaking":
                         from elora.skills.voice import is_speaking
