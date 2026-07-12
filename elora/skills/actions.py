@@ -9,9 +9,61 @@ import shlex
 import logging
 import threading
 import time
+import json
 from elora.utils import send_notification, play_chime
 
 logger = logging.getLogger("elora.actions")
+
+REGISTRY_PATH = os.path.expanduser("~/.config/elora/tasks.json")
+
+
+def _load_tasks_registry() -> dict:
+    """Loads background tasks registry from user configuration directory."""
+    if not os.path.exists(REGISTRY_PATH):
+        return {}
+    try:
+        with open(REGISTRY_PATH, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error("Failed to load tasks registry: %s", e)
+        return {}
+
+
+def _save_tasks_registry(registry: dict) -> None:
+    """Saves background tasks registry back to disk."""
+    try:
+        os.makedirs(os.path.dirname(REGISTRY_PATH), exist_ok=True)
+        with open(REGISTRY_PATH, "w") as f:
+            json.dump(registry, f, indent=2)
+    except Exception as e:
+        logger.error("Failed to save tasks registry: %s", e)
+
+
+def register_task(session_name: str, prompt: str) -> None:
+    """Registers a newly spawned tmux agent task to the registry."""
+    registry = _load_tasks_registry()
+    registry[session_name] = {
+        "prompt": prompt,
+        "started_at": time.time(),
+        "status": "running"
+    }
+    _save_tasks_registry(registry)
+
+
+def cancel_tmux_session(session_name: str) -> bool:
+    """
+    Kills the specified tmux session and updates its registry status to 'cancelled'.
+    """
+    kill_cmd = ["tmux", "kill-session", "-t", session_name]
+    res = subprocess.run(kill_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    
+    registry = _load_tasks_registry()
+    if session_name in registry:
+        registry[session_name]["status"] = "cancelled"
+        _save_tasks_registry(registry)
+        
+    return res.returncode == 0
+
 
 
 def _find_new_html_files(start_time: float) -> list[str]:
@@ -130,6 +182,9 @@ def execute_agent_task(prompt: str) -> str:
     try:
         logger.info("Spawning background agent task in tmux: %s", session_name)
         subprocess.Popen(tmux_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # Register the task in tasks.json
+        register_task(session_name, prompt)
         
         # Spawn daemon watcher thread to play completion alerts when the tmux task exits
         t = threading.Thread(target=_monitor_session, args=(session_name, prompt, start_time), daemon=True)

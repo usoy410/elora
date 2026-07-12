@@ -373,6 +373,64 @@ def handle_client(conn: socket.socket):
                         conn.sendall(b'{"status": "focus_cleared"}\n')
                         speak_text("Focus cleared. Back to normal conversation.")
                         
+                    elif cmd == "list_tasks":
+                        try:
+                            # 1. Query active tmux sessions
+                            active_sessions = []
+                            try:
+                                output = subprocess.check_output(["tmux", "list-sessions"], stderr=subprocess.DEVNULL).decode()
+                                for line in output.strip().split("\n"):
+                                    if line:
+                                        parts = line.split(":", 1)
+                                        if parts:
+                                            sname = parts[0].strip()
+                                            if sname.startswith("elora-dev"):
+                                                active_sessions.append(sname)
+                            except Exception:
+                                pass
+                            
+                            # 2. Match with registry
+                            from elora.skills.actions import _load_tasks_registry
+                            registry = _load_tasks_registry()
+                            
+                            tasks_list = []
+                            for session in active_sessions:
+                                info = registry.get(session, {})
+                                tasks_list.append({
+                                    "session": session,
+                                    "prompt": info.get("prompt", "Unknown background agent task"),
+                                    "started_at": info.get("started_at", 0.0),
+                                    "status": info.get("status", "running")
+                                })
+                                
+                            conn.sendall((json.dumps({"status": "tasks_list", "tasks": tasks_list}) + "\n").encode("utf-8"))
+                        except Exception as e:
+                            logger.error("Failed to list tasks: %s", e)
+                            conn.sendall((json.dumps({"status": "error", "message": str(e)}) + "\n").encode("utf-8"))
+
+                    elif cmd == "cancel_task":
+                        session_name = payload.get("session")
+                        if session_name:
+                            from elora.skills.actions import cancel_tmux_session
+                            success = cancel_tmux_session(session_name)
+                            conn.sendall((json.dumps({"status": "task_cancelled", "session": session_name, "success": success}) + "\n").encode("utf-8"))
+                        else:
+                            conn.sendall(b'{"status": "error", "message": "Missing session name"}\n')
+
+                    elif cmd == "get_task_log":
+                        session_name = payload.get("session")
+                        if session_name:
+                            log_text = ""
+                            try:
+                                # Capture pane from tmux session (first window, first pane)
+                                capture_cmd = ["tmux", "capture-pane", "-pt", session_name]
+                                log_text = subprocess.check_output(capture_cmd, stderr=subprocess.DEVNULL).decode("utf-8", errors="replace")
+                            except Exception as e:
+                                log_text = f"Error capturing pane: {e}"
+                            conn.sendall((json.dumps({"status": "task_log", "session": session_name, "log": log_text}) + "\n").encode("utf-8"))
+                        else:
+                            conn.sendall(b'{"status": "error", "message": "Missing session name"}\n')
+
                     elif cmd == "speak":
                         text = payload.get("text", "")
                         speak_text(text)

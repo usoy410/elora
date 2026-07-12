@@ -128,15 +128,21 @@ class EloraHUD(QWidget):
         self.btn_news = QPushButton("News", self)
         self.btn_news.setIcon(QIcon.fromTheme("news"))
         self.btn_news.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        self.btn_tasks = QPushButton("Tasks", self)
+        self.btn_tasks.setIcon(QIcon.fromTheme("system-run"))
+        self.btn_tasks.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         
         self.btn_tools.clicked.connect(lambda: self.toggle_sidebar(1))
         self.btn_chat.clicked.connect(lambda: self.toggle_sidebar(0))
         self.btn_settings.clicked.connect(lambda: self.toggle_sidebar(2))
         self.btn_browser.clicked.connect(lambda: self.toggle_sidebar(3))
         self.btn_news.clicked.connect(lambda: self.toggle_sidebar(4))
+        self.btn_tasks.clicked.connect(lambda: self.toggle_sidebar(5))
  
         self.top_bar_layout.addWidget(self.btn_tools)
         self.top_bar_layout.addWidget(self.btn_chat)
+        self.top_bar_layout.addWidget(self.btn_tasks)
         self.top_bar_layout.addWidget(self.btn_news)
         self.top_bar_layout.addWidget(self.btn_settings)
         self.top_bar_layout.addWidget(self.btn_browser)
@@ -486,6 +492,58 @@ class EloraHUD(QWidget):
         
         self.news_layout.addStretch()
         self.stacked_widget.addWidget(self.page_news)
+
+        # ---------------------------------------------------------------------
+        # Tab Page 5: Active Background Tasks
+        # ---------------------------------------------------------------------
+        self.page_tasks = QWidget(self)
+        self.tasks_layout = QVBoxLayout(self.page_tasks)
+        self.tasks_layout.setContentsMargins(5, 5, 5, 5)
+        self.tasks_layout.setSpacing(10)
+        
+        lbl_tasks_title = QLabel("RUNNING BACKGROUND AGENTS", self)
+        lbl_tasks_title.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
+        self.tasks_layout.addWidget(lbl_tasks_title)
+        
+        self.tasks_list_widget = QListWidget(self)
+        self.tasks_list_widget.setStyleSheet(
+            "QListWidget { background-color: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 4px; color: #E5E7EB; }"
+            "QListWidget::item { border-bottom: 1px solid rgba(255,255,255,0.04); padding: 6px; }"
+            "QListWidget::item:selected { background-color: rgba(255,255,255,0.08); color: #FFFFFF; border-radius: 4px; }"
+        )
+        self.tasks_list_widget.itemSelectionChanged.connect(self.on_task_selection_changed)
+        self.tasks_layout.addWidget(self.tasks_list_widget)
+        
+        lbl_log_title = QLabel("LIVE LOG OUTPUT", self)
+        lbl_log_title.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
+        self.tasks_layout.addWidget(lbl_log_title)
+        
+        self.txt_task_log = QTextBrowser(self)
+        self.txt_task_log.setFont(QFont("JetBrains Mono", 8))
+        self.txt_task_log.setStyleSheet("background-color: #08090C; color: #A7F3D0; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 6px;")
+        self.txt_task_log.setPlaceholderText("Select a running task to view real-time log output...")
+        self.tasks_layout.addWidget(self.txt_task_log)
+        
+        self.tasks_actions = QWidget(self)
+        self.tasks_actions_layout = QHBoxLayout(self.tasks_actions)
+        self.tasks_actions_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.btn_refresh_tasks = QPushButton("Refresh", self)
+        self.btn_refresh_tasks.setIcon(QIcon.fromTheme("view-refresh"))
+        self.btn_refresh_tasks.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_refresh_tasks.clicked.connect(self.refresh_tasks_list)
+        
+        self.btn_cancel_task = QPushButton("Cancel Task", self)
+        self.btn_cancel_task.setIcon(QIcon.fromTheme("process-stop"))
+        self.btn_cancel_task.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_cancel_task.setStyleSheet("background-color: rgba(239, 68, 68, 0.25); border-color: rgba(239, 68, 68, 0.45); color: #F87171; font-weight: bold;")
+        self.btn_cancel_task.clicked.connect(self.cancel_selected_task)
+        
+        self.tasks_actions_layout.addWidget(self.btn_refresh_tasks)
+        self.tasks_actions_layout.addWidget(self.btn_cancel_task)
+        self.tasks_layout.addWidget(self.tasks_actions)
+        
+        self.stacked_widget.addWidget(self.page_tasks)
         
         self.browser_refresh_timer = QTimer(self)
         self.browser_refresh_timer.timeout.connect(self.update_browser_screenshot)
@@ -543,7 +601,7 @@ class EloraHUD(QWidget):
             self.modal_overlay.setGeometry(self.rect())
 
     def toggle_sidebar(self, tab_index: int):
-        titles = ["Conversation", "Tools", "Settings", "Browser Preview", "News Telemetry"]
+        titles = ["Conversation", "Tools", "Settings", "Browser Preview", "News Telemetry", "Active Tasks"]
         self.sidebar_title.setText(titles[tab_index])
         
         if self.active_sidebar_tab == tab_index:
@@ -560,6 +618,8 @@ class EloraHUD(QWidget):
                 self.news_list.clear()
                 self.news_list.addItem("Loading news feeds...")
                 QTimer.singleShot(100, self.load_news_skimmer)
+            elif tab_index == 5:
+                self.refresh_tasks_list()
 
     def close_sidebar(self):
         self.active_sidebar_tab = -1
@@ -600,10 +660,13 @@ class EloraHUD(QWidget):
         tasks_count = 0
         try:
             output = subprocess.check_output(["tmux", "list-sessions"], stderr=subprocess.DEVNULL).decode()
-            tasks_count = len([line for line in output.strip().split("\n") if line])
+            tasks_count = len([line for line in output.strip().split("\n") if line.strip().startswith("elora-dev")])
         except Exception:
             pass
         self.lbl_tasks.setText(f"Active Tasks: {tasks_count}")
+
+        if self.active_sidebar_tab == 5:
+            self.update_tasks_periodically()
 
     def on_speed_changed(self, value: int):
         self.lbl_speed_val.setText(f"SPEED: {value/100:.1f}x")
@@ -1089,6 +1152,162 @@ class EloraHUD(QWidget):
         if link:
             self.console_output.append(f"<span style='color: #10B981;'>System:</span> Opening link in web browser...")
             open_browser_url(link)
+
+    def refresh_tasks_list(self):
+        """Queries the daemon for active tmux tasks and updates the tasks list widget."""
+        from elora.ipc.daemon_client import EloraDaemonClient
+        client = EloraDaemonClient()
+        res = client.send_cmd({"cmd": "list_tasks"})
+        
+        self.tasks_list_widget.clear()
+        if res.get("status") == "tasks_list":
+            tasks = res.get("tasks", [])
+            if not tasks:
+                self.tasks_list_widget.addItem("No active background tasks.")
+                self.txt_task_log.clear()
+                self.btn_cancel_task.setEnabled(False)
+            else:
+                self.btn_cancel_task.setEnabled(True)
+                for task in tasks:
+                    session = task.get("session")
+                    prompt = task.get("prompt", "")
+                    started_at = task.get("started_at", 0.0)
+                    
+                    import time
+                    elapsed = ""
+                    if started_at > 0:
+                        sec = int(time.time() - started_at)
+                        if sec < 60:
+                            elapsed = f"{sec}s ago"
+                        else:
+                            elapsed = f"{sec//60}m {sec%60}s ago"
+                    
+                    item = QListWidgetItem(f"{session} ({elapsed})\n↳ {prompt[:60]}...")
+                    item.setData(Qt.ItemDataRole.UserRole, task)
+                    self.tasks_list_widget.addItem(item)
+        else:
+            self.tasks_list_widget.addItem("Error: Failed to connect to daemon.")
+            self.btn_cancel_task.setEnabled(False)
+
+    def on_task_selection_changed(self):
+        """Called when a task is selected in the list widget. Fetches log immediately."""
+        self.update_task_log_view()
+
+    def update_task_log_view(self):
+        """Fetches the latest pane text from the daemon for the selected task."""
+        selected_items = self.tasks_list_widget.selectedItems()
+        if not selected_items:
+            return
+        
+        item = selected_items[0]
+        task = item.data(Qt.ItemDataRole.UserRole)
+        if not task:
+            self.txt_task_log.clear()
+            return
+            
+        session = task.get("session")
+        from elora.ipc.daemon_client import EloraDaemonClient
+        client = EloraDaemonClient()
+        res = client.send_cmd({"cmd": "get_task_log", "session": session})
+        if res.get("status") == "task_log":
+            raw_log = res.get("log", "")
+            from elora.skills.skills import strip_ansi_codes
+            cleaned_log = strip_ansi_codes(raw_log)
+            self.txt_task_log.setPlainText(cleaned_log)
+            self.txt_task_log.verticalScrollBar().setValue(
+                self.txt_task_log.verticalScrollBar().maximum()
+            )
+        else:
+            self.txt_task_log.setPlainText("Failed to load logs for this session.")
+
+    def cancel_selected_task(self):
+        """Sends cancel command to the daemon for the selected task."""
+        selected_items = self.tasks_list_widget.selectedItems()
+        if not selected_items:
+            return
+            
+        item = selected_items[0]
+        task = item.data(Qt.ItemDataRole.UserRole)
+        if not task:
+            return
+            
+        session = task.get("session")
+        
+        from PySide6.QtWidgets import QMessageBox
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Cancel Background Task")
+        msg_box.setText(f"Are you sure you want to cancel task '{session}'?")
+        msg_box.setInformativeText(f"Prompt: {task.get('prompt')}")
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        msg_box.addButton(QMessageBox.StandardButton.Yes)
+        msg_box.addButton(QMessageBox.StandardButton.No)
+        msg_box.setDefaultButton(QMessageBox.StandardButton.No)
+        
+        msg_box.setStyleSheet(
+            "QMessageBox { background-color: #111111; color: #E5E7EB; border: 1px solid rgba(255,255,255,0.1); }"
+            "QLabel { color: #E5E7EB; font-family: 'JetBrains Mono', 'Segoe UI'; font-size: 11px; }"
+            "QPushButton { background-color: rgba(255,255,255,0.08); color: #E5E7EB; border: 1px solid rgba(255,255,255,0.15); padding: 4px 12px; font-weight: bold; }"
+            "QPushButton:hover { background-color: rgba(255,255,255,0.15); }"
+        )
+        
+        reply = msg_box.exec()
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+            
+        from elora.ipc.daemon_client import EloraDaemonClient
+        client = EloraDaemonClient()
+        res = client.send_cmd({"cmd": "cancel_task", "session": session})
+        if res.get("status") == "task_cancelled" and res.get("success"):
+            self.console_output.append(f"<span style='color: #EF4444;'>System: Cancelled background task '{session}'</span>")
+            from elora.utils import play_chime
+            play_chime()
+            self.refresh_tasks_list()
+        else:
+            self.console_output.append(f"<span style='color: #EF4444;'>System: Failed to cancel task '{session}'</span>")
+
+    def update_tasks_periodically(self):
+        """Refreshes active tasks list and selected log without losing selection state."""
+        selected_row = self.tasks_list_widget.currentRow()
+        
+        from elora.ipc.daemon_client import EloraDaemonClient
+        client = EloraDaemonClient()
+        res = client.send_cmd({"cmd": "list_tasks"})
+        
+        if res.get("status") == "tasks_list":
+            tasks = res.get("tasks", [])
+            current_sessions = []
+            for i in range(self.tasks_list_widget.count()):
+                item = self.tasks_list_widget.item(i)
+                task_data = item.data(Qt.ItemDataRole.UserRole)
+                if task_data:
+                    current_sessions.append(task_data.get("session"))
+            
+            new_sessions = [t.get("session") for t in tasks]
+            
+            if current_sessions != new_sessions:
+                self.refresh_tasks_list()
+                if selected_row >= 0 and selected_row < self.tasks_list_widget.count():
+                    self.tasks_list_widget.setCurrentRow(selected_row)
+            else:
+                for i in range(self.tasks_list_widget.count()):
+                    item = self.tasks_list_widget.item(i)
+                    task = tasks[i]
+                    session = task.get("session")
+                    prompt = task.get("prompt", "")
+                    started_at = task.get("started_at", 0.0)
+                    
+                    import time
+                    elapsed = ""
+                    if started_at > 0:
+                        sec = int(time.time() - started_at)
+                        if sec < 60:
+                            elapsed = f"{sec}s ago"
+                        else:
+                            elapsed = f"{sec//60}m {sec%60}s ago"
+                    item.setText(f"{session} ({elapsed})\n↳ {prompt[:60]}...")
+                    item.setData(Qt.ItemDataRole.UserRole, task)
+                    
+        self.update_task_log_view()
 
 
 _hud_lock_socket = None
