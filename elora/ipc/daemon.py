@@ -424,7 +424,24 @@ def handle_client(conn: socket.socket):
                             try:
                                 # Capture pane from tmux session (first window, first pane)
                                 capture_cmd = ["tmux", "capture-pane", "-pt", session_name]
-                                log_text = subprocess.check_output(capture_cmd, stderr=subprocess.DEVNULL).decode("utf-8", errors="replace")
+                                res = subprocess.run(capture_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                if res.returncode == 0:
+                                    log_text = res.stdout.decode("utf-8", errors="replace")
+                                else:
+                                    # Check if the tmux session actually exists.
+                                    # Why: Avoids confusing "exit status 1" errors when a task completes or has not fully initialized.
+                                    check_cmd = ["tmux", "has-session", "-t", session_name]
+                                    check_res = subprocess.run(check_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                    if check_res.returncode != 0:
+                                        log_text = "Task completed or session not found."
+                                    else:
+                                        stderr_msg = res.stderr.decode("utf-8", errors="replace").strip()
+                                        if "can't find pane" in stderr_msg or "no pane" in stderr_msg:
+                                            log_text = "Initializing task..."
+                                        elif "no server running" in stderr_msg:
+                                            log_text = "Tmux server is not running."
+                                        else:
+                                            log_text = f"Waiting for task log output... ({stderr_msg})"
                             except Exception as e:
                                 log_text = f"Error capturing pane: {e}"
                             conn.sendall((json.dumps({"status": "task_log", "session": session_name, "log": log_text}) + "\n").encode("utf-8"))

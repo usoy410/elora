@@ -28,7 +28,10 @@ from elora.core.config import load_config, save_config, set_config_override
 
 # Import local ui packages
 from elora.ui.styles import HUD_STYLESHEET, MODAL_OVERLAY_STYLE, MODAL_CARD_STYLE
-from elora.ui.threads import DaemonSTTThread, DaemonQueryThread, NewsFetchThread
+from elora.ui.threads import (
+    DaemonSTTThread, DaemonQueryThread, NewsFetchThread,
+    TaskListFetchThread, TaskLogFetchThread, TaskCancelThread
+)
 from elora.ui.voice_orb import OrbWidget
 from elora.ui.hud_overlay import EloraModalOverlay
 
@@ -59,6 +62,9 @@ class EloraHUD(QWidget):
         self.record_process: Optional[subprocess.Popen] = None
         self.is_recording = False
         self.active_sidebar_tab = -1  # -1 = closed
+        self.task_list_thread = None
+        self.task_log_thread = None
+        self.task_cancel_thread = None
 
         self.setObjectName("EloraHUD")
         self.setWindowTitle("Elora HUD")
@@ -1022,40 +1028,106 @@ class EloraHUD(QWidget):
 
     def reset_to_idle(self):
         self.update_state_ui("idle", "[ HOLD ALT TO TALK ]")
-
     def trigger_startup_greeting(self):
+        """
+        Determines the startup behavior:
+        - If there is an active running background task, updates the user with its status and latest logs.
+        - Otherwise, greets the user with a fresh greeting and clears historical context.
+        """
         from elora.ipc.daemon_client import EloraDaemonClient
         client = EloraDaemonClient()
-        history = []
+        
+        # 1. Fetch active tasks from the daemon
+        running_tasks = []
         try:
-            res = client.send_cmd({"cmd": "get_history"})
-            if res.get("status") == "history":
-                history = res.get("history", [])
-        except Exception:
-            pass
+            res = client.send_cmd({"cmd": "list_tasks"})
+            if res.get("status") == "tasks_list":
+                running_tasks = res.get("tasks", [])
+        except Exception as e:
+            logger.error("Failed to query tasks list for greeting: %s", e)
 
-        if history:
-            self.session_history = history
+        # Filter to actual running sessions
+        active_running = [t for t in running_tasks if t.get("status") == "running"]
+
+        if active_running:
+            # We have active running background tasks! Let's update the user.
+            task = active_running[0] # Focus on the first active running task
+            session = task.get("session")
+            prompt = task.get("prompt", "")
+            started_at = task.get("started_at", 0.0)
+            
+            latest_line = ""
+            try:
+                log_res = client.send_cmd({"cmd": "get_task_log", "session": session})
+                if log_res.get("status") == "task_log":
+                    raw_log = log_res.get("log", "")
+                    from elora.skills.skills import strip_ansi_codes
+                    cleaned_log = strip_ansi_codes(raw_log).strip()
+                    if cleaned_log:
+                        # Get the last 2 non-empty lines of the log
+                        lines = [l.strip() for l in cleaned_log.split("\n") if l.strip()]
+                        if lines:
+                            latest_line = lines[-1]
+                            if len(lines) > 1 and (latest_line.startswith("[") or len(latest_line) < 15):
+                                latest_line = f"{lines[-2]} | {latest_line}"
+            except Exception as e:
+                logger.error("Failed to fetch log for greeting update: %s", e)
+
+            import time
+            elapsed = ""
+            if started_at > 0:
+                sec = int(time.time() - started_at)
+                if sec < 60:
+                    elapsed = f"{sec} seconds"
+                elif sec < 3600:
+                    elapsed = f"{sec//60} minutes and {sec%60} seconds"
+                else:
+                    elapsed = f"{sec//3600} hours and {(sec%3600)//60} minutes"
+            else:
+                elapsed = "some time"
+
+            # Clean and truncate prompt for voice / output
+            voice_prompt = prompt[:80] + "..." if len(prompt) > 80 else prompt
+            
+            if len(active_running) > 1:
+                update_text = f"I am currently running {len(active_running)} background tasks. The primary task is: '{voice_prompt}', started {elapsed} ago."
+            else:
+                update_text = f"I am currently running the task: '{voice_prompt}', started {elapsed} ago."
+                
+            if latest_line:
+                # Truncate log snippet to keep speech short
+                speech_latest = latest_line[:120] + "..." if len(latest_line) > 120 else latest_line
+                update_text += f" The latest progress is: {speech_latest}"
+            else:
+                update_text += " No progress logs are available yet."
+
+            # Update session history and UI console
+            self.session_history = [{"role": "assistant", "content": update_text}]
             self.console_output.clear()
+            self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {update_text}")
             
-            for msg in history:
-                role = msg.get("role")
-                content = msg.get("content", "")
-                if role == "user":
-                    self.console_output.append(f"<span style='color: #10B981;'>You:</span> {content}")
-                elif role == "assistant":
-                    try:
-                        payload = json.loads(content)
-                        action_type = payload.get("action")
-                        args_type = payload.get("arguments", {})
-                        if action_type == "reply":
-                            self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {args_type.get('message', '')}")
-                    except Exception:
-                        self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {content}")
-            
-            self.reset_to_idle()
+            self.update_state_ui("speaking", "SPEAKING...")
+            QTimer.singleShot(1500, self.reset_to_idle)
+
+            import threading
+            def speak_update_bg():
+                try:
+                    c = EloraDaemonClient()
+                    # Sync history in daemon to match
+                    c.send_cmd({"cmd": "reset_history"})
+                    c.send_cmd({
+                        "cmd": "add_history",
+                        "role": "assistant",
+                        "content": json.dumps({"action": "reply", "arguments": {"message": update_text}})
+                    })
+                    c.send_cmd({"cmd": "speak", "text": update_text})
+                except Exception as bg_err:
+                    logger.error("Failed to speak startup update: %s", bg_err)
+
+            threading.Thread(target=speak_update_bg, daemon=True).start()
             return
 
+        # 2. No active running tasks, proceed with fresh greeting and reset history
         user_name = "boss"
         try:
             from elora.core.memory import is_memory_available, search_memory
@@ -1097,8 +1169,9 @@ class EloraHUD(QWidget):
         ]
         local_greeting = random.choice(greetings)
 
+        self.session_history = [{"role": "assistant", "content": local_greeting}]
+        self.console_output.clear()
         self.console_output.append(f"<span style='color: #818CF8;'>Elora:</span> {local_greeting}")
-        self.session_history.append({"role": "assistant", "content": local_greeting})
         
         self.update_state_ui("speaking", "SPEAKING...")
         QTimer.singleShot(1500, self.reset_to_idle)
@@ -1154,11 +1227,19 @@ class EloraHUD(QWidget):
             open_browser_url(link)
 
     def refresh_tasks_list(self):
-        """Queries the daemon for active tmux tasks and updates the tasks list widget."""
-        from elora.ipc.daemon_client import EloraDaemonClient
-        client = EloraDaemonClient()
-        res = client.send_cmd({"cmd": "list_tasks"})
+        """Queries the daemon for active tmux tasks asynchronously."""
+        if hasattr(self, "task_list_thread") and self.task_list_thread:
+            try:
+                self.task_list_thread.tasks_fetched.disconnect()
+            except Exception:
+                pass
         
+        self.task_list_thread = TaskListFetchThread()
+        self.task_list_thread.tasks_fetched.connect(self.on_tasks_fetched)
+        self.task_list_thread.finished.connect(self.task_list_thread.deleteLater)
+        self.task_list_thread.start()
+
+    def on_tasks_fetched(self, res: dict):
         self.tasks_list_widget.clear()
         if res.get("status") == "tasks_list":
             tasks = res.get("tasks", [])
@@ -1186,7 +1267,7 @@ class EloraHUD(QWidget):
                     item.setData(Qt.ItemDataRole.UserRole, task)
                     self.tasks_list_widget.addItem(item)
         else:
-            self.tasks_list_widget.addItem("Error: Failed to connect to daemon.")
+            self.tasks_list_widget.addItem(f"Error: {res.get('message', 'Failed to connect to daemon.')}")
             self.btn_cancel_task.setEnabled(False)
 
     def on_task_selection_changed(self):
@@ -1194,7 +1275,7 @@ class EloraHUD(QWidget):
         self.update_task_log_view()
 
     def update_task_log_view(self):
-        """Fetches the latest pane text from the daemon for the selected task."""
+        """Fetches the latest pane text from the daemon for the selected task asynchronously."""
         selected_items = self.tasks_list_widget.selectedItems()
         if not selected_items:
             return
@@ -1206,19 +1287,33 @@ class EloraHUD(QWidget):
             return
             
         session = task.get("session")
-        from elora.ipc.daemon_client import EloraDaemonClient
-        client = EloraDaemonClient()
-        res = client.send_cmd({"cmd": "get_task_log", "session": session})
+        
+        if hasattr(self, "task_log_thread") and self.task_log_thread:
+            try:
+                self.task_log_thread.log_fetched.disconnect()
+            except Exception:
+                pass
+                
+        self.task_log_thread = TaskLogFetchThread(session)
+        self.task_log_thread.log_fetched.connect(self.on_task_log_fetched)
+        self.task_log_thread.finished.connect(self.task_log_thread.deleteLater)
+        self.task_log_thread.start()
+
+    def on_task_log_fetched(self, res: dict):
         if res.get("status") == "task_log":
             raw_log = res.get("log", "")
             from elora.skills.skills import strip_ansi_codes
             cleaned_log = strip_ansi_codes(raw_log)
+            scrollbar = self.txt_task_log.verticalScrollBar()
+            at_bottom = scrollbar.value() >= scrollbar.maximum() - 10
+            
             self.txt_task_log.setPlainText(cleaned_log)
-            self.txt_task_log.verticalScrollBar().setValue(
-                self.txt_task_log.verticalScrollBar().maximum()
-            )
+            
+            if at_bottom:
+                scrollbar.setValue(scrollbar.maximum())
         else:
-            self.txt_task_log.setPlainText("Failed to load logs for this session.")
+            # Log failed or task not active anymore
+            pass
 
     def cancel_selected_task(self):
         """Sends cancel command to the daemon for the selected task."""
@@ -1254,9 +1349,22 @@ class EloraHUD(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
             
-        from elora.ipc.daemon_client import EloraDaemonClient
-        client = EloraDaemonClient()
-        res = client.send_cmd({"cmd": "cancel_task", "session": session})
+        self.btn_cancel_task.setEnabled(False)
+        
+        if hasattr(self, "task_cancel_thread") and self.task_cancel_thread:
+            try:
+                self.task_cancel_thread.task_cancelled.disconnect()
+            except Exception:
+                pass
+                
+        self.task_cancel_thread = TaskCancelThread(session)
+        self.task_cancel_thread.task_cancelled.connect(self.on_task_cancelled)
+        self.task_cancel_thread.finished.connect(self.task_cancel_thread.deleteLater)
+        self.task_cancel_thread.start()
+
+    def on_task_cancelled(self, res: dict):
+        self.btn_cancel_task.setEnabled(True)
+        session = res.get("session", "Unknown")
         if res.get("status") == "task_cancelled" and res.get("success"):
             self.console_output.append(f"<span style='color: #EF4444;'>System: Cancelled background task '{session}'</span>")
             from elora.utils import play_chime
@@ -1266,15 +1374,20 @@ class EloraHUD(QWidget):
             self.console_output.append(f"<span style='color: #EF4444;'>System: Failed to cancel task '{session}'</span>")
 
     def update_tasks_periodically(self):
-        """Refreshes active tasks list and selected log without losing selection state."""
-        selected_row = self.tasks_list_widget.currentRow()
-        
-        from elora.ipc.daemon_client import EloraDaemonClient
-        client = EloraDaemonClient()
-        res = client.send_cmd({"cmd": "list_tasks"})
-        
+        """Refreshes active tasks list and selected log without losing selection state (asynchronously)."""
+        if hasattr(self, "task_list_thread") and self.task_list_thread and self.task_list_thread.isRunning():
+            return
+            
+        self.task_list_thread = TaskListFetchThread()
+        self.task_list_thread.tasks_fetched.connect(self.on_periodic_tasks_fetched)
+        self.task_list_thread.finished.connect(self.task_list_thread.deleteLater)
+        self.task_list_thread.start()
+
+    def on_periodic_tasks_fetched(self, res: dict):
         if res.get("status") == "tasks_list":
             tasks = res.get("tasks", [])
+            selected_row = self.tasks_list_widget.currentRow()
+            
             current_sessions = []
             for i in range(self.tasks_list_widget.count()):
                 item = self.tasks_list_widget.item(i)
@@ -1285,9 +1398,33 @@ class EloraHUD(QWidget):
             new_sessions = [t.get("session") for t in tasks]
             
             if current_sessions != new_sessions:
-                self.refresh_tasks_list()
-                if selected_row >= 0 and selected_row < self.tasks_list_widget.count():
-                    self.tasks_list_widget.setCurrentRow(selected_row)
+                self.tasks_list_widget.clear()
+                if not tasks:
+                    self.tasks_list_widget.addItem("No active background tasks.")
+                    self.txt_task_log.clear()
+                    self.btn_cancel_task.setEnabled(False)
+                else:
+                    self.btn_cancel_task.setEnabled(True)
+                    for task in tasks:
+                        session = task.get("session")
+                        prompt = task.get("prompt", "")
+                        started_at = task.get("started_at", 0.0)
+                        
+                        import time
+                        elapsed = ""
+                        if started_at > 0:
+                            sec = int(time.time() - started_at)
+                            if sec < 60:
+                                elapsed = f"{sec}s ago"
+                            else:
+                                elapsed = f"{sec//60}m {sec%60}s ago"
+                        
+                        item = QListWidgetItem(f"{session} ({elapsed})\n↳ {prompt[:60]}...")
+                        item.setData(Qt.ItemDataRole.UserRole, task)
+                        self.tasks_list_widget.addItem(item)
+                    
+                    if selected_row >= 0 and selected_row < self.tasks_list_widget.count():
+                        self.tasks_list_widget.setCurrentRow(selected_row)
             else:
                 for i in range(self.tasks_list_widget.count()):
                     item = self.tasks_list_widget.item(i)
@@ -1306,8 +1443,8 @@ class EloraHUD(QWidget):
                             elapsed = f"{sec//60}m {sec%60}s ago"
                     item.setText(f"{session} ({elapsed})\n↳ {prompt[:60]}...")
                     item.setData(Qt.ItemDataRole.UserRole, task)
-                    
-        self.update_task_log_view()
+            
+            self.update_task_log_view()
 
 
 _hud_lock_socket = None

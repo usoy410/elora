@@ -130,3 +130,57 @@ class NewsFetchThread(QThread):
             except Exception as e:
                 logger.error("Failed to fetch feed %s: %s", feed_url, e)
         self.feeds_fetched.emit(results)
+
+
+class TaskListFetchThread(QThread):
+    """Background thread to query the daemon for active tmux tasks."""
+    tasks_fetched = Signal(dict)
+
+    def run(self):
+        try:
+            from elora.ipc.daemon_client import EloraDaemonClient
+            client = EloraDaemonClient()
+            res = client.send_cmd({"cmd": "list_tasks"})
+            self.tasks_fetched.emit(res)
+        except Exception as e:
+            logger.error("TaskListFetchThread error: %s", e)
+            self.tasks_fetched.emit({"status": "error", "message": str(e)})
+
+
+class TaskLogFetchThread(QThread):
+    """Background thread to query the daemon for a specific task's log."""
+    log_fetched = Signal(dict)
+
+    def __init__(self, session: str):
+        super().__init__()
+        self.session = session
+
+    def run(self):
+        try:
+            from elora.ipc.daemon_client import EloraDaemonClient
+            client = EloraDaemonClient()
+            res = client.send_cmd({"cmd": "get_task_log", "session": self.session})
+            self.log_fetched.emit(res)
+        except Exception as e:
+            logger.error("TaskLogFetchThread error for session %s: %s", self.session, e)
+            self.log_fetched.emit({"status": "error", "message": str(e)})
+
+
+class TaskCancelThread(QThread):
+    """Background thread to query the daemon to cancel a specific task."""
+    task_cancelled = Signal(dict)
+
+    def __init__(self, session: str):
+        super().__init__()
+        self.session = session
+
+    def run(self):
+        try:
+            from elora.ipc.daemon_client import EloraDaemonClient
+            client = EloraDaemonClient()
+            res = client.send_cmd({"cmd": "cancel_task", "session": self.session})
+            self.task_cancelled.emit(res)
+        except Exception as e:
+            logger.error("TaskCancelThread error for session %s: %s", self.session, e)
+            self.task_cancelled.emit({"status": "error", "message": str(e)})
+

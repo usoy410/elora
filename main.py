@@ -7,7 +7,7 @@ import sys
 import os
 import json
 import logging
-from typing import List, Dict
+from typing import List, Dict, Any
 
 # Set logger configuration
 logging.basicConfig(level=logging.WARNING)
@@ -119,7 +119,7 @@ def execute_single_prompt(prompt: str) -> None:
     """
     Runs a single prompt through the ReAct agent loop and processes the final action.
     """
-    from elora.agent import run_agent_loop
+    from elora.core.agent import run_agent_loop
     
     def print_status(event: Any):
         if isinstance(event, dict):
@@ -163,8 +163,6 @@ def execute_single_prompt(prompt: str) -> None:
         
     add_to_history("user", prompt)
     
-    # We must import Any for type annotations inside execute_single_prompt
-    from typing import Any
     result = run_agent_loop(prompt, session_history, print_status)
     process_action(result)
 
