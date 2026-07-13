@@ -4,10 +4,12 @@ Manages multi-turn query loops, tool execution, and history updates.
 """
 
 import logging
+import os
 from typing import Dict, Any, List, Callable, Optional
 
 from elora.core.brain import query_elora
 from elora.skills.skills import search_duckduckgo, scrape_webpage, run_local_command
+from elora.skills.email import fetch_recent_emails
 from elora.skills.browser_control import execute_browser_action
 from elora.skills.os_control import move_mouse_smoothly, click_mouse_at, type_keyboard_text
 from elora.skills.system_skills import set_system_volume, set_system_brightness, perform_window_action, launch_application
@@ -22,6 +24,40 @@ from elora.core.memory import (
 )
 
 logger = logging.getLogger("elora.agent")
+
+
+def is_visual_query(prompt: str) -> bool:
+    """
+    Checks if a query requires visual screen context based on specific visual/GUI keywords.
+    
+    Why: Prevents taking slow, unnecessary screenshots for common conversational verbs
+    like 'show', 'see', 'look', or 'this' which are frequently used in pure text queries.
+    """
+    prompt_lower = prompt.lower()
+    
+    # Precise screen inspection and explanation queries
+    screen_queries = {
+        "screenshot", 
+        "explain screen", "explain my screen", "explain the screen",
+        "describe screen", "describe my screen", "describe the screen",
+        "what is on my screen", "what's on my screen", "what is on the screen", "what's on the screen",
+        "tell me what you see", "what do you see on", "what is visible", "explain this window", "what window is open"
+    }
+    
+    if any(query in prompt_lower for query in screen_queries):
+        return True
+        
+    # Graphical interaction commands that explicitly require visual coordinates or element locating immediately
+    interaction_patterns = [
+        "click on the", "click the", "click on my", "double-click the", "double-click on",
+        "type into the", "type in the", "type text into", "move mouse to", "move cursor to",
+        "click at", "click on screen", "click screen"
+    ]
+    
+    if any(pattern in prompt_lower for pattern in interaction_patterns):
+        return True
+        
+    return False
 
 
 def run_agent_loop(
@@ -40,6 +76,9 @@ def run_agent_loop(
     """
     current_prompt = initial_prompt
     loop_history = list(history)  # Shallow copy history to modify locally
+    
+    # Initialize visual requirement check
+    needs_screenshot = is_visual_query(initial_prompt)
     
     step_count = 0
     max_steps = 5
@@ -66,24 +105,38 @@ def run_agent_loop(
         step_count += 1
         logger.info("Agent Loop Turn %d/%d", step_count, max_steps)
         
-        # Capture a fresh screenshot of the desktop/active window so the model has real-time visual context
-        try:
-            if screenshot_callback:
-                success = screenshot_callback()
-                if not success:
+        # Capture a fresh screenshot of the desktop/active window if needed, otherwise clean up stale ones
+        if needs_screenshot:
+            try:
+                if screenshot_callback:
+                    success = screenshot_callback()
+                    if not success:
+                        from elora.skills.os_control import capture_desktop_screenshot
+                        capture_desktop_screenshot()
+                else:
                     from elora.skills.os_control import capture_desktop_screenshot
                     capture_desktop_screenshot()
-            else:
-                from elora.skills.os_control import capture_desktop_screenshot
-                capture_desktop_screenshot()
-        except Exception as e:
-            logger.debug("Failed to capture screenshot: %s", e)
+            except Exception as e:
+                logger.debug("Failed to capture screenshot: %s", e)
+        else:
+            screenshot_path = "/tmp/elora_screenshot.png"
+            if os.path.exists(screenshot_path):
+                try:
+                    os.remove(screenshot_path)
+                except Exception:
+                    pass
 
         # Query the Ollama brain
         result = query_elora(current_prompt, history=loop_history)
         thought = result.get("thought", "")
         action = result.get("action")
         args = result.get("arguments", {})
+        
+        # Decide if the next step in the loop requires visual feedback
+        needs_screenshot = action in (
+            "browser_browse", "browser_click", "browser_type", 
+            "browser_get_elements", "desktop_input", "system_control"
+        )
         
         # Report reasoning thought
         if thought:
@@ -107,14 +160,38 @@ def run_agent_loop(
             
         # Report tool start
         if action in ("web_search", "web_scrape", "command_run", "browser_browse", "browser_click",
-                      "browser_type", "browser_get_elements", "desktop_input", "system_control"):
+                      "browser_type", "browser_get_elements", "desktop_input", "system_control", "email_fetch_summary"):
             _report_status({
                 "type": "tool_start",
                 "tool": action,
                 "arguments": args
             })
             
-        if action == "web_search":
+        if action == "email_fetch_summary":
+            status_msg = "Fetching unread or recent emails..."
+            logger.info(status_msg)
+            
+            # Run local email fetcher
+            email_result = fetch_recent_emails()
+            
+            _report_status({
+                "type": "tool_output",
+                "tool": "email_fetch_summary",
+                "arguments": args,
+                "output": email_result
+            })
+            
+            # Feed back to the LLM context
+            loop_history.append({"role": "user", "content": f"System Tool Output (email_fetch_summary):\n{email_result}"})
+            current_prompt = (
+                "Analyze the retrieved email list, prioritize the important emails, and summarize them clearly for the user. "
+                "Ensure the summary is highly conversational, flowing, and sounds like a natural spoken response rather than a structured list. "
+                "Do not use robotic headings or uppercase brackets like 'SECURITY ALERT (Google)' or raw numbered bullet points. "
+                "Instead, describe them using natural phrasing and conversational transitions (e.g., 'First, there's a security alert from Google...', "
+                "'Next, we have another alert from Hugging Face...', 'After that, an action required from...', 'And lastly, ...')."
+            )
+
+        elif action == "web_search":
             query = args.get("query", "")
             if not query:
                 msg = "Tool execution skipped: Query parameter missing."
@@ -138,7 +215,11 @@ def run_agent_loop(
             
             # Feed back to the LLM context
             loop_history.append({"role": "user", "content": f"System Tool Output (web_search for '{query}'):\n{search_result}"})
-            current_prompt = f"Analyze the search results for '{query}' and determine your next action."
+            current_prompt = (
+                f"Analyze the search results for '{query}' and determine your next action. "
+                "If you have enough information to reply, make sure your response is highly conversational, "
+                "fluent, and avoids mechanical numbered lists."
+            )
             
         elif action == "web_scrape":
             url = args.get("url", "")
@@ -164,7 +245,11 @@ def run_agent_loop(
             
             # Feed back to LLM context
             loop_history.append({"role": "user", "content": f"System Tool Output (web_scrape of {url}):\n{scrape_result}"})
-            current_prompt = f"Analyze the scraped webpage content from {url} and determine your next action."
+            current_prompt = (
+                f"Analyze the scraped webpage content from {url} and determine your next action. "
+                "If you have enough information to reply, make sure your response is highly conversational, "
+                "fluent, and avoids mechanical numbered lists."
+            )
             
         elif action == "command_run":
             cmd = args.get("command", "")

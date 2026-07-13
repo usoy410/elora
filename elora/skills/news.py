@@ -159,11 +159,20 @@ def get_spoken_news_summary() -> str:
         return "I couldn't fetch any news right now."
 
     top = articles[:5]
+    transitions = [
+        "First, from {source}, we have: {title}.",
+        "Next, from {source}: {title}.",
+        "Following that, from {source}: {title}.",
+        "Then, from {source}: {title}.",
+        "And lastly, from {source}: {title}."
+    ]
+    
     lines = ["Here are your top headlines."]
-    for i, art in enumerate(top, start=1):
+    for i, art in enumerate(top):
         source = art.get("source", "")
         title = art.get("title", "")
-        lines.append(f"Number {i}, from {source}: {title}.")
+        transition_tmpl = transitions[i] if i < len(transitions) else "Next, from {source}: {title}."
+        lines.append(transition_tmpl.format(source=source, title=title))
 
     lines.append("Say 'open article number' followed by the index to open it in Brave.")
     return " ".join(lines)

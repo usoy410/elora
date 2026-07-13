@@ -71,6 +71,14 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
             custom_prompt = config["custom_instructions"]
         else:
             custom_prompt = PERSONALITIES.get(personality, PERSONALITIES["default"])
+    summary_formatting = (
+        "\n\nFormatting & Response Style:\n"
+        "- Whenever you summarize, report, or explain information to the user (such as email list fetches, web search results, webpage scraping summaries, news feeds, or lists of items), you MUST present it in a highly conversational, flowing, and natural style as if spoken by a human companion.\n"
+        "- Never use robotic, capitalized prefixes or headers (e.g. do NOT say 'SECURITY ALERT (Google)' or 'ACTION REQUIRED'). Convert them into natural conversational speech (e.g., 'a security alert from Google' or 'an action is required for...').\n"
+        "- Avoid plain numbered bullet points (e.g., '1. ... 2. ...') when describing lists. Instead, connect ideas using smooth transitional phrasing such as 'First, there's...', 'Next, we have...', 'Following that...', and 'Lastly, ...' to ensure a fluent, natural conversational flow."
+    )
+    custom_prompt += summary_formatting
+
     skills_cfg = config.get("skills", {"web_search": True, "web_scrape": True, "command_run": True})
     
     allowed_actions = ["antigravity", "browser", "news_fetch", "reply",
@@ -106,6 +114,11 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
     if skills_cfg.get("command_run", True):
         allowed_actions.append("command_run")
         guidelines.insert(2, "3. Use 'command_run' to execute local shell commands (e.g., copying/moving/deleting files, creating directories, running scripts, package commands, or system queries) to autonomously perform actions on behalf of the user. Always use non-interactive flags (e.g., '-y', '--yes') for initializations, package managers, and tool installations to prevent prompts from hanging.")
+        
+    email_cfg = config.get("email", {})
+    if email_cfg.get("enabled", False):
+        allowed_actions.append("email_fetch_summary")
+        guidelines.append("21. For any email-related requests (e.g., checking, reading, summarizing, or searching emails), you MUST first use 'email_fetch_summary' to retrieve the mailbox content. Do NOT attempt to open the browser or search the web for emails unless this tool fails or is disabled.")
         
     guidelines_str = "\n".join(guidelines)
     

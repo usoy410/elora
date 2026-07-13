@@ -140,6 +140,14 @@ Elora settings are stored dynamically in `~/.config/elora/config.json`. You can 
   },
   "stt": {
     "model_name": "gemini"
+  },
+  "email": {
+    "enabled": false,
+    "imap_server": "imap.gmail.com",
+    "imap_port": 993,
+    "email_address": "user@gmail.com",
+    "password_env_var": "ELORA_EMAIL_PASSWORD",
+    "max_emails_to_check": 10
   }
 }
 ```
@@ -152,6 +160,12 @@ Elora settings are stored dynamically in `~/.config/elora/config.json`. You can 
 *   **voice.voice_name**: Sets the active speech voice (e.g. `af_heart` for Kokoro).
 *   **voice.speed**: The playback speed multiplier.
 *   **stt.model_name**: Set to `gemini` for cloud speech-to-text.
+*   **email.enabled**: Toggles the IMAP email reporting feature.
+*   **email.imap_server**: The hostname of your IMAP server (e.g., `imap.gmail.com`).
+*   **email.imap_port**: The SSL/TLS port of your IMAP server (typically `993`).
+*   **email.email_address**: The email address used to authenticate.
+*   **email.password_env_var**: The environment variable name where your IMAP account/app password is stored (default is `ELORA_EMAIL_PASSWORD`).
+*   **email.max_emails_to_check**: The number of recent/unread emails to scan and summarize.
 
 ### Hugging Face Space Warmup
 Free Hugging Face Spaces on default tiers automatically suspend after 48 hours of inactivity. To prevent the cold-start delay from affecting your first speech request, the Elora daemon automatically initiates an asynchronous warmup routine for your Space in the background when the daemon boots or receives a preload request.

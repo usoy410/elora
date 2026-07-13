@@ -141,6 +141,8 @@ def execute_single_prompt(prompt: str) -> None:
                     print(f"[*] Desktop input: {args.get('input_type')}")
                 elif tool == "system_control":
                     print(f"[*] System control: {args.get('control_type')}")
+                elif tool == "email_fetch_summary":
+                    print("[*] Connecting and fetching emails from mailbox...")
                 else:
                     print(f"[*] Starting action '{tool}'...")
             elif etype == "tool_output":

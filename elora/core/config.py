@@ -42,6 +42,14 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "browser": {
         "default_command": "xdg-open"
     },
+    "email": {
+        "enabled": True,
+        "imap_server": "imap.gmail.com",
+        "imap_port": 993,
+        "email_address": "",
+        "password_env_var": "ELORA_EMAIL_PASSWORD",
+        "max_emails_to_check": 10
+    },
     "personality": "default",
     "custom_personality": ""
 }
