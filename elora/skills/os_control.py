@@ -147,13 +147,123 @@ def type_keyboard_text(text: str) -> str:
 def capture_desktop_screenshot(output_path: str = "/tmp/elora_screenshot.png") -> bool:
     """
     Captures a screenshot of the desktop.
-    First tries GNOME shell DBus screenshot (since user is on GNOME Wayland).
-    Falls back to gnome-screenshot, grim (Niri Wayland), and finally PyAutoGUI.
+    
+    Why: Equips the agent with real-time visual context of the screen.
+    Attempts the following screenshot options in order:
+    1. XDG Desktop Portal Screenshot API (supports all modern Wayland/X11 systems, e.g. GNOME, KDE, XFCE).
+    2. GNOME Shell DBus API (legacy private interface).
+    3. gnome-screenshot CLI tool.
+    4. spectacle CLI tool (KDE).
+    5. xfce4-screenshooter CLI tool (XFCE).
+    6. cinnamon-screenshot CLI tool (Cinnamon).
+    7. mate-screenshot CLI tool (MATE).
+    8. grim CLI tool (wlroots Wayland, e.g. Sway, Hyprland).
+    9. maim CLI tool (X11).
+    10. scrot CLI tool (X11).
+    11. PyAutoGUI screenshot capture fallback.
     """
     import subprocess
     import os
     
-    # 1. Try GNOME DBus screenshot
+    # 1. Try XDG Desktop Portal (robust modern Wayland & X11 standard)
+    try:
+        import sys
+        from PySide6.QtCore import QCoreApplication, QEventLoop, QObject, Slot, QTimer, SLOT
+        from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusMessage
+        import shutil
+
+        class PortalHelper(QObject):
+            def __init__(self, out_path, loop):
+                super().__init__()
+                self.out_path = out_path
+                self.loop = loop
+                self.success = False
+                self.bus = QDBusConnection.sessionBus()
+                
+            def run(self):
+                if not self.bus.isConnected():
+                    self.loop.quit()
+                    return
+                    
+                self.bus.registerObject("/", self)
+                
+                self.interface = QDBusInterface(
+                    "org.freedesktop.portal.Desktop",
+                    "/org/freedesktop/portal/desktop",
+                    "org.freedesktop.portal.Screenshot",
+                    self.bus
+                )
+                
+                # Request screenshot silently if possible (uses cached permission if granted)
+                options = {"interactive": False}
+                reply = self.interface.call("Screenshot", "", options)
+                if reply.type() == QDBusMessage.MessageType.ErrorMessage:
+                    logger.debug("Portal DBus call failed: %s", reply.errorMessage())
+                    self.loop.quit()
+                    return
+                    
+                try:
+                    request_path = reply.arguments()[0].path()
+                except Exception as e:
+                    logger.debug("Failed to parse request path from portal: %s", e)
+                    self.loop.quit()
+                    return
+                    
+                connected = self.bus.connect(
+                    "org.freedesktop.portal.Desktop",
+                    request_path,
+                    "org.freedesktop.portal.Request",
+                    "Response",
+                    self,
+                    SLOT("handle_response(uint,QVariantMap)")
+                )
+                if not connected:
+                    logger.debug("Failed to connect portal Response signal.")
+                    self.loop.quit()
+                    return
+                    
+                # Limit wait to 6 seconds to prevent blocking the agent loop if user does not react
+                self.timer = QTimer(self)
+                self.timer.setSingleShot(True)
+                self.timer.timeout.connect(self.timeout)
+                self.timer.start(6000)
+
+            @Slot("uint", "QVariantMap")
+            def handle_response(self, response_code, results):
+                if response_code == 0:
+                    uri = results.get("uri")
+                    if uri and uri.startswith("file://"):
+                        local_path = uri[7:]
+                        if os.path.exists(local_path):
+                            try:
+                                shutil.copy(local_path, self.out_path)
+                                self.success = True
+                                logger.info("Captured screenshot via XDG Desktop Portal.")
+                            except Exception as e:
+                                logger.error("Failed to copy portal screenshot file: %s", e)
+                self.loop.quit()
+
+            def timeout(self):
+                logger.debug("Portal screenshot timed out waiting for user confirmation.")
+                self.loop.quit()
+
+        app_created = False
+        app = QCoreApplication.instance()
+        if app is None:
+            app = QCoreApplication(sys.argv)
+            app_created = True
+
+        loop = QEventLoop()
+        helper = PortalHelper(output_path, loop)
+        QTimer.singleShot(0, helper.run)
+        loop.exec()
+        
+        if helper.success and os.path.exists(output_path):
+            return True
+    except Exception as e:
+        logger.debug("XDG Desktop Portal screenshot method failed: %s", e)
+
+    # 2. Try GNOME DBus screenshot
     try:
         cmd = [
             "gdbus", "call", "--session", 
@@ -169,7 +279,7 @@ def capture_desktop_screenshot(output_path: str = "/tmp/elora_screenshot.png") -
     except Exception as e:
         logger.debug("GNOME DBus screenshot failed: %s", e)
 
-    # 2. Try gnome-screenshot command utility
+    # 3. Try gnome-screenshot command utility
     try:
         cmd = ["gnome-screenshot", "-f", output_path]
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3.0)
@@ -179,7 +289,47 @@ def capture_desktop_screenshot(output_path: str = "/tmp/elora_screenshot.png") -
     except Exception as e:
         logger.debug("gnome-screenshot failed: %s", e)
 
-    # 3. Try grim (Wayland wlroots/Niri)
+    # 4. Try spectacle (KDE)
+    try:
+        cmd = ["spectacle", "-b", "-n", "-o", output_path]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3.0)
+        if res.returncode == 0 and os.path.exists(output_path):
+            logger.info("Captured screenshot via spectacle.")
+            return True
+    except Exception as e:
+        logger.debug("spectacle failed: %s", e)
+
+    # 5. Try xfce4-screenshooter (XFCE)
+    try:
+        cmd = ["xfce4-screenshooter", "-f", "-s", output_path]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3.0)
+        if res.returncode == 0 and os.path.exists(output_path):
+            logger.info("Captured screenshot via xfce4-screenshooter.")
+            return True
+    except Exception as e:
+        logger.debug("xfce4-screenshooter failed: %s", e)
+
+    # 6. Try cinnamon-screenshot (Cinnamon)
+    try:
+        cmd = ["cinnamon-screenshot", "-f", output_path]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3.0)
+        if res.returncode == 0 and os.path.exists(output_path):
+            logger.info("Captured screenshot via cinnamon-screenshot.")
+            return True
+    except Exception as e:
+        logger.debug("cinnamon-screenshot failed: %s", e)
+
+    # 7. Try mate-screenshot (MATE)
+    try:
+        cmd = ["mate-screenshot", "-f", output_path]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3.0)
+        if res.returncode == 0 and os.path.exists(output_path):
+            logger.info("Captured screenshot via mate-screenshot.")
+            return True
+    except Exception as e:
+        logger.debug("mate-screenshot failed: %s", e)
+
+    # 8. Try grim (Wayland wlroots/Niri)
     try:
         cmd = ["grim", output_path]
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3.0)
@@ -189,7 +339,27 @@ def capture_desktop_screenshot(output_path: str = "/tmp/elora_screenshot.png") -
     except Exception as e:
         logger.debug("grim failed: %s", e)
 
-    # 4. Try pyautogui fallback
+    # 9. Try maim (X11)
+    try:
+        cmd = ["maim", "-u", output_path]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3.0)
+        if res.returncode == 0 and os.path.exists(output_path):
+            logger.info("Captured screenshot via maim.")
+            return True
+    except Exception as e:
+        logger.debug("maim failed: %s", e)
+
+    # 10. Try scrot (X11)
+    try:
+        cmd = ["scrot", "-z", output_path]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3.0)
+        if res.returncode == 0 and os.path.exists(output_path):
+            logger.info("Captured screenshot via scrot.")
+            return True
+    except Exception as e:
+        logger.debug("scrot failed: %s", e)
+
+    # 11. Try pyautogui fallback
     try:
         screenshot = pyautogui.screenshot()
         screenshot.save(output_path)
@@ -200,4 +370,5 @@ def capture_desktop_screenshot(output_path: str = "/tmp/elora_screenshot.png") -
         logger.error("All screenshot capture methods failed: %s", e)
 
     return False
+
 
