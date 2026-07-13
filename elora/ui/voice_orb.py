@@ -119,13 +119,13 @@ class OrbWidget(QWidget):
         sine_val = math.sin(self.phase)
         
         if self.state == "listening":
-            cfg = (36 + sine_val * 4.0, QColor(236, 72, 153, 160), QColor(244, 63, 94, 255))
+            cfg = (34 + sine_val * 3.0, QColor(255, 255, 255, 80), QColor(255, 255, 255, 200))
         elif self.state == "thinking":
-            cfg = (34 + abs(sine_val) * 2.0, QColor(79, 70, 229, 180), QColor(99, 102, 241, 255))
+            cfg = (32 + abs(sine_val) * 1.5, QColor(255, 255, 255, 60), QColor(255, 255, 255, 160))
         elif self.state == "speaking":
-            cfg = (36 + sine_val * 6.0, QColor(16, 185, 129, 160), QColor(52, 211, 153, 255))
+            cfg = (34 + sine_val * 4.5, QColor(255, 255, 255, 80), QColor(255, 255, 255, 200))
         else:
-            cfg = (30 + sine_val * 1.5, QColor(99, 102, 241, 60), QColor(129, 140, 248, 180))
+            cfg = (28 + sine_val * 1.0, QColor(255, 255, 255, 30), QColor(255, 255, 255, 120))
 
         radius, glow_color, center_color = cfg
 

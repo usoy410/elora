@@ -84,25 +84,25 @@ class CavaVisualizer(QWidget):
         width = self.width()
         height = self.height()
         
-        bar_w = 5
+        bar_w = 3
         gap = 4
         total_w = self.bar_count * bar_w + (self.bar_count - 1) * gap
         start_x = (width - total_w) / 2
         
-        # Set gradients based on active state
+        # Set gradients based on active state (minimalist monochromatic white)
         gradient = QLinearGradient(0, height, 0, 0)
         if self.state == "listening":
-            gradient.setColorAt(0.0, QColor(236, 72, 153, 50))    # Pink translucency
-            gradient.setColorAt(1.0, QColor(244, 63, 94, 255))    # Rose peak
+            gradient.setColorAt(0.0, QColor(255, 255, 255, 30))
+            gradient.setColorAt(1.0, QColor(255, 255, 255, 180))
         elif self.state == "thinking":
-            gradient.setColorAt(0.0, QColor(79, 70, 229, 50))     # Indigo translucency
-            gradient.setColorAt(1.0, QColor(99, 102, 241, 255))   # Royal Indigo peak
+            gradient.setColorAt(0.0, QColor(255, 255, 255, 20))
+            gradient.setColorAt(1.0, QColor(255, 255, 255, 140))
         elif self.state == "speaking":
-            gradient.setColorAt(0.0, QColor(16, 185, 129, 50))    # Emerald translucency
-            gradient.setColorAt(1.0, QColor(52, 211, 153, 255))   # Mint peak
+            gradient.setColorAt(0.0, QColor(255, 255, 255, 30))
+            gradient.setColorAt(1.0, QColor(255, 255, 255, 180))
         else:
-            gradient.setColorAt(0.0, QColor(129, 140, 248, 30))   # Low-key blue-purple
-            gradient.setColorAt(1.0, QColor(129, 140, 248, 180))
+            gradient.setColorAt(0.0, QColor(255, 255, 255, 15))
+            gradient.setColorAt(1.0, QColor(255, 255, 255, 90))
             
         painter.setBrush(gradient)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -111,4 +111,4 @@ class CavaVisualizer(QWidget):
             val = self.bar_values[i]
             x = start_x + i * (bar_w + gap)
             y = height - val - 5  # Give a slight 5px margin at the bottom
-            painter.drawRoundedRect(x, y, bar_w, val, 2.0, 2.0)
+            painter.drawRoundedRect(x, y, bar_w, val, 1.5, 1.5)

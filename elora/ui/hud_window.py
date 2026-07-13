@@ -326,11 +326,44 @@ class EloraHUD(QWidget):
         self.page_settings = QWidget(self)
         self.settings_layout = QVBoxLayout(self.page_settings)
         self.settings_layout.setContentsMargins(5, 5, 5, 5)
-        self.settings_layout.setSpacing(12)
+        self.settings_layout.setSpacing(10)
+
+        # Settings Sub-navigation Bar for Minimalist look
+        self.settings_nav = QWidget(self)
+        self.settings_nav_layout = QHBoxLayout(self.settings_nav)
+        self.settings_nav_layout.setContentsMargins(0, 0, 0, 8)
+        self.settings_nav_layout.setSpacing(10)
+
+        self.btn_sub_speech = QPushButton("Speech", self)
+        self.btn_sub_brain = QPushButton("Brain", self)
+        self.btn_sub_system = QPushButton("System", self)
+
+        self.sub_buttons = [self.btn_sub_speech, self.btn_sub_brain, self.btn_sub_system]
+        for btn in self.sub_buttons:
+            btn.setCheckable(True)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn.setProperty("class", "sub-tab-btn")
+            self.settings_nav_layout.addWidget(btn)
+
+        self.btn_sub_speech.clicked.connect(lambda: self.switch_settings_subpage(0))
+        self.btn_sub_brain.clicked.connect(lambda: self.switch_settings_subpage(1))
+        self.btn_sub_system.clicked.connect(lambda: self.switch_settings_subpage(2))
+
+        self.settings_layout.addWidget(self.settings_nav)
+
+        # Stacked widget for sub-pages
+        self.settings_stack = QStackedWidget(self)
+        self.settings_layout.addWidget(self.settings_stack)
+
+        # ------------------- Sub-page 0: Speech -------------------
+        self.subpage_speech = QWidget(self)
+        layout_speech = QVBoxLayout(self.subpage_speech)
+        layout_speech.setContentsMargins(0, 0, 0, 0)
+        layout_speech.setSpacing(10)
 
         lbl_voice = QLabel("VOICE MODEL", self)
-        lbl_voice.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
-        self.settings_layout.addWidget(lbl_voice)
+        lbl_voice.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
+        layout_speech.addWidget(lbl_voice)
         
         self.cmb_voice = QComboBox(self)
         self.cmb_voice.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -343,44 +376,11 @@ class EloraHUD(QWidget):
         idx = self.cmb_voice.findData(active_voice)
         if idx != -1:
             self.cmb_voice.setCurrentIndex(idx)
-        self.settings_layout.addWidget(self.cmb_voice)
-
-        lbl_voice_provider = QLabel("VOICE PROVIDER", self)
-        lbl_voice_provider.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
-        self.settings_layout.addWidget(lbl_voice_provider)
-
-        self.cmb_voice_provider = QComboBox(self)
-        self.cmb_voice_provider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.cmb_voice_provider.addItem("Local (Offline ONNX)", "local")
-        self.cmb_voice_provider.addItem("Cloud (Hugging Face Space)", "cloud")
-        active_provider = voice_cfg.get("provider", "local")
-        idx_prov = self.cmb_voice_provider.findData(active_provider)
-        if idx_prov != -1:
-            self.cmb_voice_provider.setCurrentIndex(idx_prov)
-        self.settings_layout.addWidget(self.cmb_voice_provider)
-
-        self.lbl_hf_space_url = QLabel("HUGGING FACE SPACE URL", self)
-        self.lbl_hf_space_url.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
-        self.settings_layout.addWidget(self.lbl_hf_space_url)
-
-        self.txt_hf_space_url = QLineEdit(self)
-        self.txt_hf_space_url.setPlaceholderText("https://username-space.hf.space")
-        self.txt_hf_space_url.setText(voice_cfg.get("hf_space_url", ""))
-        self.settings_layout.addWidget(self.txt_hf_space_url)
-
-        self.lbl_hf_token = QLabel("HUGGING FACE TOKEN (OPTIONAL)", self)
-        self.lbl_hf_token.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
-        self.settings_layout.addWidget(self.lbl_hf_token)
-
-        self.txt_hf_token = QLineEdit(self)
-        self.txt_hf_token.setEchoMode(QLineEdit.EchoMode.Password)
-        self.txt_hf_token.setPlaceholderText("Enter HF User Token if private...")
-        self.txt_hf_token.setText(voice_cfg.get("hf_token", ""))
-        self.settings_layout.addWidget(self.txt_hf_token)
+        layout_speech.addWidget(self.cmb_voice)
 
         lbl_stt_model = QLabel("SPEECH RECOGNITION (STT) ENGINE", self)
-        lbl_stt_model.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
-        self.settings_layout.addWidget(lbl_stt_model)
+        lbl_stt_model.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
+        layout_speech.addWidget(lbl_stt_model)
         
         self.cmb_stt_model = QComboBox(self)
         self.cmb_stt_model.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -391,24 +391,76 @@ class EloraHUD(QWidget):
         idx_stt = self.cmb_stt_model.findData(active_stt_model)
         if idx_stt != -1:
             self.cmb_stt_model.setCurrentIndex(idx_stt)
-        self.settings_layout.addWidget(self.cmb_stt_model)
+        layout_speech.addWidget(self.cmb_stt_model)
 
         self.lbl_speed_val = QLabel("SPEED: 1.0x", self)
-        self.lbl_speed_val.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
-        self.settings_layout.addWidget(self.lbl_speed_val)
+        self.lbl_speed_val.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
+        layout_speech.addWidget(self.lbl_speed_val)
         
         self.sld_speed = QSlider(Qt.Orientation.Horizontal, self)
         self.sld_speed.setRange(50, 200)
         self.sld_speed.setValue(int(voice_cfg.get("speed", 1.0) * 100))
         self.sld_speed.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.sld_speed.valueChanged.connect(self.on_speed_changed)
-        self.settings_layout.addWidget(self.sld_speed)
+        layout_speech.addWidget(self.sld_speed)
         
         self.on_speed_changed(self.sld_speed.value())
 
+        lbl_voice_provider = QLabel("VOICE PROVIDER", self)
+        lbl_voice_provider.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
+        layout_speech.addWidget(lbl_voice_provider)
+
+        self.cmb_voice_provider = QComboBox(self)
+        self.cmb_voice_provider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.cmb_voice_provider.addItem("Local (Offline ONNX)", "local")
+        self.cmb_voice_provider.addItem("Cloud (Hugging Face Space)", "cloud")
+        active_provider = voice_cfg.get("provider", "local")
+        idx_prov = self.cmb_voice_provider.findData(active_provider)
+        if idx_prov != -1:
+            self.cmb_voice_provider.setCurrentIndex(idx_prov)
+        layout_speech.addWidget(self.cmb_voice_provider)
+
+        self.lbl_hf_space_url = QLabel("HUGGING FACE SPACE URL", self)
+        self.lbl_hf_space_url.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
+        layout_speech.addWidget(self.lbl_hf_space_url)
+
+        self.txt_hf_space_url = QLineEdit(self)
+        self.txt_hf_space_url.setPlaceholderText("https://username-space.hf.space")
+        self.txt_hf_space_url.setText(voice_cfg.get("hf_space_url", ""))
+        layout_speech.addWidget(self.txt_hf_space_url)
+
+        self.lbl_hf_token = QLabel("HUGGING FACE TOKEN (OPTIONAL)", self)
+        self.lbl_hf_token.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
+        layout_speech.addWidget(self.lbl_hf_token)
+
+        self.txt_hf_token = QLineEdit(self)
+        self.txt_hf_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self.txt_hf_token.setPlaceholderText("Enter HF User Token if private...")
+        self.txt_hf_token.setText(voice_cfg.get("hf_token", ""))
+        layout_speech.addWidget(self.txt_hf_token)
+
+        layout_speech.addStretch()
+        self.settings_stack.addWidget(self.subpage_speech)
+
+        # ------------------- Sub-page 1: Brain -------------------
+        self.subpage_brain = QWidget(self)
+        layout_brain = QVBoxLayout(self.subpage_brain)
+        layout_brain.setContentsMargins(0, 0, 0, 0)
+        layout_brain.setSpacing(10)
+
+        lbl_api_key = QLabel("GEMINI API KEY", self)
+        lbl_api_key.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
+        layout_brain.addWidget(lbl_api_key)
+        
+        self.txt_api_key = QLineEdit(self)
+        self.txt_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.txt_api_key.setPlaceholderText("Enter your Gemini API key...")
+        self.txt_api_key.setText(self.config.get("gemini_api_key", ""))
+        layout_brain.addWidget(self.txt_api_key)
+
         lbl_personality = QLabel("AI PERSONALITY", self)
-        lbl_personality.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
-        self.settings_layout.addWidget(lbl_personality)
+        lbl_personality.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
+        layout_brain.addWidget(lbl_personality)
         
         self.cmb_personality = QComboBox(self)
         self.cmb_personality.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -431,14 +483,14 @@ class EloraHUD(QWidget):
         idx_p = self.cmb_personality.findData(active_personality)
         if idx_p != -1:
             self.cmb_personality.setCurrentIndex(idx_p)
-        self.settings_layout.addWidget(self.cmb_personality)
+        layout_brain.addWidget(self.cmb_personality)
         
         self.lbl_custom_personality = QLabel("CUSTOM PERSONALITY TYPE", self)
-        self.lbl_custom_personality.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
-        self.settings_layout.addWidget(self.lbl_custom_personality)
+        self.lbl_custom_personality.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
+        layout_brain.addWidget(self.lbl_custom_personality)
         
         self.txt_custom_personality = QLineEdit(self)
-        self.txt_custom_personality.setPlaceholderText("Enter custom personality (e.g. sarcastic pirate, helpful friend)...")
+        self.txt_custom_personality.setPlaceholderText("Enter custom personality (e.g. sarcastic pirate)...")
         
         current_custom = self.config.get("custom_personality")
         if current_custom is None:
@@ -449,48 +501,53 @@ class EloraHUD(QWidget):
             else:
                 current_custom = ""
         self.txt_custom_personality.setText(current_custom)
-        self.settings_layout.addWidget(self.txt_custom_personality)
-        
-        lbl_api_key = QLabel("GEMINI API KEY", self)
-        lbl_api_key.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.5);")
-        self.settings_layout.addWidget(lbl_api_key)
-        
-        self.txt_api_key = QLineEdit(self)
-        self.txt_api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.txt_api_key.setPlaceholderText("Enter your Gemini API key...")
-        self.txt_api_key.setText(self.config.get("gemini_api_key", ""))
-        self.settings_layout.addWidget(self.txt_api_key)
-        
+        layout_brain.addWidget(self.txt_custom_personality)
+
         self.cmb_personality.currentIndexChanged.connect(self.on_personality_changed)
         self.on_personality_changed()
 
-        self.cmb_voice_provider.currentIndexChanged.connect(self.on_voice_provider_changed)
-        self.on_voice_provider_changed()
+        layout_brain.addStretch()
+        self.settings_stack.addWidget(self.subpage_brain)
 
-        # Safe Gate checkbox
+        # ------------------- Sub-page 2: System -------------------
+        self.subpage_system = QWidget(self)
+        layout_system = QVBoxLayout(self.subpage_system)
+        layout_system.setContentsMargins(0, 0, 0, 0)
+        layout_system.setSpacing(15)
+
         self.chk_safe_gate = QCheckBox("Safe Gate Mode (Approve dangerous commands)", self)
         self.chk_safe_gate.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.chk_safe_gate.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 10px; color: #D1D5DB;")
         self.chk_safe_gate.setChecked(self.config.get("safe_gate_mode", True))
-        self.settings_layout.addWidget(self.chk_safe_gate)
+        layout_system.addWidget(self.chk_safe_gate)
+
+        # Spacer to push action buttons to the bottom
+        layout_system.addSpacing(20)
 
         # Restart conversation button
         self.btn_reset_conv = QPushButton("Restart Conversation", self)
         self.btn_reset_conv.setIcon(QIcon.fromTheme("view-refresh"))
         self.btn_reset_conv.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_reset_conv.setStyleSheet("background-color: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.3);")
+        self.btn_reset_conv.setStyleSheet("background-color: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.25); color: #FCA5A5;")
         self.btn_reset_conv.clicked.connect(self.reset_conversation)
-        self.settings_layout.addWidget(self.btn_reset_conv)
+        layout_system.addWidget(self.btn_reset_conv)
 
         # Save settings action
         self.btn_save_settings = QPushButton("Save Settings", self)
         self.btn_save_settings.setIcon(QIcon.fromTheme("document-save"))
         self.btn_save_settings.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_save_settings.setStyleSheet("background-color: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.4);")
+        self.btn_save_settings.setStyleSheet("background-color: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.25); color: #A7F3D0;")
         self.btn_save_settings.clicked.connect(self.save_settings)
-        self.settings_layout.addWidget(self.btn_save_settings)
+        layout_system.addWidget(self.btn_save_settings)
 
-        self.settings_layout.addStretch()
+        layout_system.addStretch()
+        self.settings_stack.addWidget(self.subpage_system)
+
+        # Initialize active sub-tab state
+        self.switch_settings_subpage(0)
+
+        self.cmb_voice_provider.currentIndexChanged.connect(self.on_voice_provider_changed)
+        self.on_voice_provider_changed()
         self.stacked_widget.addWidget(self.page_settings)
 
         # ---------------------------------------------------------------------
@@ -710,6 +767,15 @@ class EloraHUD(QWidget):
         if self.active_sidebar_tab == 5:
             self.update_tasks_periodically()
 
+    def switch_settings_subpage(self, index: int):
+        """
+        Switches the active sub-page in the dynamic settings configurations panel.
+        Highlights the selected category button and hides the other configuration cards.
+        """
+        self.settings_stack.setCurrentIndex(index)
+        for i, btn in enumerate(self.sub_buttons):
+            btn.setChecked(i == index)
+
     def on_speed_changed(self, value: int):
         self.lbl_speed_val.setText(f"SPEED: {value/100:.1f}x")
 
@@ -870,11 +936,11 @@ class EloraHUD(QWidget):
         self.cava.set_state(state)
         
         if state == "listening":
-            self.state_label.setStyleSheet("color: #EC4899; font-family: 'JetBrains Mono'; font-size: 13px; font-weight: bold; letter-spacing: 2px;")
+            self.state_label.setStyleSheet("color: #FFFFFF; font-family: 'JetBrains Mono'; font-size: 12px; font-weight: bold; letter-spacing: 2px;")
         elif state == "thinking":
-            self.state_label.setStyleSheet("color: #818CF8; font-family: 'JetBrains Mono'; font-size: 13px; font-weight: bold; letter-spacing: 2px;")
+            self.state_label.setStyleSheet("color: rgba(255, 255, 255, 0.85); font-family: 'JetBrains Mono'; font-size: 12px; font-weight: bold; letter-spacing: 2px;")
         elif state == "speaking":
-            self.state_label.setStyleSheet("color: #10B981; font-family: 'JetBrains Mono'; font-size: 13px; font-weight: bold; letter-spacing: 2px;")
+            self.state_label.setStyleSheet("color: #FFFFFF; font-family: 'JetBrains Mono'; font-size: 12px; font-weight: bold; letter-spacing: 2px;")
         else:
             self.state_label.setStyleSheet("color: rgba(255, 255, 255, 0.4); font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; letter-spacing: 2px;")
 

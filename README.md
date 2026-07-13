@@ -124,7 +124,7 @@ uv run python main.py --explain-screen
 
 ## Configuration
 
-Elora settings are stored dynamically in `~/.config/elora/config.json`. You can modify them directly inside the HUD Settings panel, or manually customize the file:
+Elora settings are stored dynamically in `~/.config/elora/config.json`. You can modify them directly inside the HUD Settings panel—where options are cleanly organized into **Speech**, **Brain**, and **System** sub-tabs to minimize clutter—or manually customize the file:
 
 ```json
 {

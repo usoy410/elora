@@ -26,12 +26,12 @@ class SystemMonitorWidget(QFrame):
         
         # Panel Title
         self.lbl_title = QLabel("SYSTEM MONITOR", self)
-        self.lbl_title.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; color: #00F0FF; letter-spacing: 1px;")
+        self.lbl_title.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 10px; font-weight: bold; color: rgba(255, 255, 255, 0.85); letter-spacing: 1px;")
         self.layout.addWidget(self.lbl_title)
         
         # CPU Monitor
         self.lbl_cpu_title = QLabel("CPU LOAD", self)
-        self.lbl_cpu_title.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; color: rgba(255, 255, 255, 0.5);")
+        self.lbl_cpu_title.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 8px; color: rgba(255, 255, 255, 0.45);")
         self.layout.addWidget(self.lbl_cpu_title)
         
         self.pb_cpu = QProgressBar(self)
@@ -43,7 +43,7 @@ class SystemMonitorWidget(QFrame):
         
         # RAM Monitor
         self.lbl_ram_title = QLabel("RAM USAGE: --", self)
-        self.lbl_ram_title.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; color: rgba(255, 255, 255, 0.5);")
+        self.lbl_ram_title.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 8px; color: rgba(255, 255, 255, 0.45);")
         self.layout.addWidget(self.lbl_ram_title)
         
         self.pb_ram = QProgressBar(self)
@@ -55,7 +55,7 @@ class SystemMonitorWidget(QFrame):
         
         # Tasks Monitor
         self.lbl_tasks_title = QLabel("ACTIVE AGENTS", self)
-        self.lbl_tasks_title.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; color: rgba(255, 255, 255, 0.5);")
+        self.lbl_tasks_title.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 8px; color: rgba(255, 255, 255, 0.45);")
         self.layout.addWidget(self.lbl_tasks_title)
         
         self.pb_tasks = QProgressBar(self)
@@ -67,7 +67,7 @@ class SystemMonitorWidget(QFrame):
         
         # Extra Stats Frame
         self.lbl_status = QLabel("HUD CONNECTION: ACTIVE\nGATE GUARD: STANDBY\nCORE ENGINE: READY", self)
-        self.lbl_status.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; color: rgba(255, 255, 255, 0.45); line-height: 14px;")
+        self.lbl_status.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 8px; color: rgba(255, 255, 255, 0.35); line-height: 14px;")
         self.layout.addWidget(self.lbl_status)
         
         # Telemetry Timer
