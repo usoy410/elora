@@ -426,6 +426,23 @@ def sync_assignment_to_calendar(assignment: Dict[str, Any]) -> bool:
         return False
 
 
+def _clean_markdown_text(text: str) -> str:
+    """
+    Escapes special HTML characters to prevent ReportLab XML parser errors,
+    and converts basic markdown styling (*italic*, **bold**, `code`) into ReportLab HTML tags.
+    """
+    import re
+    # 1. Escape XML characters
+    escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    # 2. Match bold **text** -> <b>text</b>
+    escaped = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', escaped)
+    # 3. Match italic *text* -> <i>text</i>
+    escaped = re.sub(r'\*(.*?)\*', r'<i>\1</i>', escaped)
+    # 4. Match inline code `code` -> <font face="Courier">code</font>
+    escaped = re.sub(r'\`(.*?)\`', r'<font face="Courier">\1</font>', escaped)
+    return escaped
+
+
 def save_classroom_document(content: str, filename: str, file_format: str = "md") -> str:
     """
     Saves a text document (e.g. study guide or response draft) in TXT, MD, or PDF format.
@@ -465,6 +482,7 @@ def save_classroom_document(content: str, filename: str, file_format: str = "md"
             from reportlab.lib.pagesizes import letter
             from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
             from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            import re
             
             doc = SimpleDocTemplate(output_path, pagesize=letter, rightMargin=54, leftMargin=54, topMargin=54, bottomMargin=54)
             styles = getSampleStyleSheet()
@@ -493,6 +511,16 @@ def save_classroom_document(content: str, filename: str, file_format: str = "md"
                 spaceBefore=12,
                 spaceAfter=6
             ))
+            styles.add(ParagraphStyle(
+                name='CustomBullet',
+                parent=styles['Normal'],
+                fontName='Helvetica',
+                fontSize=10,
+                leading=14,
+                leftIndent=20,
+                firstLineIndent=-10,
+                spaceAfter=6
+            ))
             
             story = []
             lines = content.splitlines()
@@ -504,13 +532,24 @@ def save_classroom_document(content: str, filename: str, file_format: str = "md"
                     
                 # Basic markdown header processing
                 if line_strip.startswith("# "):
-                    story.append(Paragraph(line_strip[2:], styles['CustomTitle']))
+                    header_text = _clean_markdown_text(line_strip[2:])
+                    story.append(Paragraph(header_text, styles['CustomTitle']))
                 elif line_strip.startswith("## "):
-                    story.append(Paragraph(line_strip[3:], styles['CustomHeading2']))
+                    header_text = _clean_markdown_text(line_strip[3:])
+                    story.append(Paragraph(header_text, styles['CustomHeading2']))
                 elif line_strip.startswith("### "):
-                    story.append(Paragraph(line_strip[4:], styles['Heading3']))
+                    header_text = _clean_markdown_text(line_strip[4:])
+                    story.append(Paragraph(header_text, styles['Heading3']))
+                elif line_strip.startswith("- ") or line_strip.startswith("* ") or line_strip.startswith("• "):
+                    bullet_text = _clean_markdown_text(line_strip[2:])
+                    story.append(Paragraph(f"&bull; {bullet_text}", styles['CustomBullet']))
+                elif re.match(r'^\d+\.\s', line_strip):
+                    match = re.match(r'^(\d+\.)\s(.*)', line_strip)
+                    num_prefix = match.group(1)
+                    num_text = _clean_markdown_text(match.group(2))
+                    story.append(Paragraph(f"{num_prefix} {num_text}", styles['CustomBullet']))
                 else:
-                    clean_text = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    clean_text = _clean_markdown_text(line)
                     story.append(Paragraph(clean_text, styles['CustomBody']))
                     
             doc.build(story)

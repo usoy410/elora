@@ -1445,6 +1445,25 @@ class EloraHUD(QWidget):
             from elora.skills.actions import open_browser_url
             open_browser_url(link)
 
+    def _start_background_thread(self, thread):
+        """
+        Safely registers and starts a QThread background worker.
+        
+        Why: Prevents PySide6 crashes/segmentation faults by ensuring
+        active threads are not garbage-collected while executing.
+        """
+        if not hasattr(self, "_active_threads"):
+            self._active_threads = set()
+        self._active_threads.add(thread)
+        
+        def cleanup():
+            self._active_threads.discard(thread)
+            
+        thread.finished.connect(cleanup)
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+        return thread
+
     def refresh_tasks_list(self):
         """Queries the daemon for active tmux tasks asynchronously."""
         if hasattr(self, "task_list_thread") and self.task_list_thread:
@@ -1455,8 +1474,7 @@ class EloraHUD(QWidget):
         
         self.task_list_thread = TaskListFetchThread()
         self.task_list_thread.tasks_fetched.connect(self.on_tasks_fetched)
-        self.task_list_thread.finished.connect(self.task_list_thread.deleteLater)
-        self.task_list_thread.start()
+        self._start_background_thread(self.task_list_thread)
 
     def on_tasks_fetched(self, res: dict):
         self.tasks_list_widget.clear()
@@ -1537,6 +1555,9 @@ class EloraHUD(QWidget):
         session = task.get("session")
         
         if hasattr(self, "task_log_thread") and self.task_log_thread:
+            # Prevent starting duplicate request thread for the same session
+            if self.task_log_thread.isRunning() and getattr(self.task_log_thread, "session", None) == session:
+                return
             try:
                 self.task_log_thread.log_fetched.disconnect()
             except Exception:
@@ -1544,21 +1565,26 @@ class EloraHUD(QWidget):
                 
         self.task_log_thread = TaskLogFetchThread(session)
         self.task_log_thread.log_fetched.connect(self.on_task_log_fetched)
-        self.task_log_thread.finished.connect(self.task_log_thread.deleteLater)
-        self.task_log_thread.start()
+        self._start_background_thread(self.task_log_thread)
 
     def on_task_log_fetched(self, res: dict):
         if res.get("status") == "task_log":
-            raw_log = res.get("log", "")
-            from elora.skills.skills import strip_ansi_codes
-            cleaned_log = strip_ansi_codes(raw_log)
-            scrollbar = self.txt_task_log.verticalScrollBar()
-            at_bottom = scrollbar.value() >= scrollbar.maximum() - 10
-            
-            self.txt_task_log.setPlainText(cleaned_log)
-            
-            if at_bottom:
-                scrollbar.setValue(scrollbar.maximum())
+            # Only update the log text browser if the fetched log matches the currently selected session
+            selected_items = self.tasks_list_widget.selectedItems()
+            if selected_items:
+                item = selected_items[0]
+                task = item.data(Qt.ItemDataRole.UserRole)
+                if task and task.get("session") == res.get("session"):
+                    raw_log = res.get("log", "")
+                    from elora.skills.skills import strip_ansi_codes
+                    cleaned_log = strip_ansi_codes(raw_log)
+                    scrollbar = self.txt_task_log.verticalScrollBar()
+                    at_bottom = scrollbar.value() >= scrollbar.maximum() - 10
+                    
+                    self.txt_task_log.setPlainText(cleaned_log)
+                    
+                    if at_bottom:
+                        scrollbar.setValue(scrollbar.maximum())
         else:
             # Log failed or task not active anymore
             pass
@@ -1607,8 +1633,7 @@ class EloraHUD(QWidget):
                 
         self.task_cancel_thread = TaskCancelThread(session)
         self.task_cancel_thread.task_cancelled.connect(self.on_task_cancelled)
-        self.task_cancel_thread.finished.connect(self.task_cancel_thread.deleteLater)
-        self.task_cancel_thread.start()
+        self._start_background_thread(self.task_cancel_thread)
 
     def on_task_cancelled(self, res: dict):
         self.btn_cancel_task.setEnabled(True)
@@ -1628,12 +1653,32 @@ class EloraHUD(QWidget):
             
         self.task_list_thread = TaskListFetchThread()
         self.task_list_thread.tasks_fetched.connect(self.on_periodic_tasks_fetched)
-        self.task_list_thread.finished.connect(self.task_list_thread.deleteLater)
-        self.task_list_thread.start()
+        self._start_background_thread(self.task_list_thread)
 
     def on_periodic_tasks_fetched(self, res: dict):
+        """
+        Processes periodic task list updates from the daemon.
+        
+        Why: Rebuilds the UI task list if tasks changed or count mismatched.
+        Handles empty task list cases defensively to prevent IndexError.
+        """
         if res.get("status") == "tasks_list":
             tasks = res.get("tasks", [])
+            
+            # Handle empty tasks list case defensively
+            if not tasks:
+                has_placeholder = (
+                    self.tasks_list_widget.count() == 1 and
+                    self.tasks_list_widget.item(0).data(Qt.ItemDataRole.UserRole) is None
+                )
+                if not has_placeholder:
+                    self.tasks_list_widget.clear()
+                    self.tasks_list_widget.addItem("No active background tasks.")
+                    self.txt_task_log.clear()
+                    self.btn_cancel_task.setEnabled(False)
+                self.on_task_selection_changed()
+                return
+
             selected_row = self.tasks_list_widget.currentRow()
             
             current_sessions = []
@@ -1645,49 +1690,45 @@ class EloraHUD(QWidget):
             
             new_sessions = [t.get("session") for t in tasks]
             
-            if current_sessions != new_sessions:
+            # Rebuild list if session names changed or list widget item count differs from task count
+            if current_sessions != new_sessions or self.tasks_list_widget.count() != len(tasks):
                 self.tasks_list_widget.clear()
-                if not tasks:
-                    self.tasks_list_widget.addItem("No active background tasks.")
-                    self.txt_task_log.clear()
-                    self.btn_cancel_task.setEnabled(False)
-                else:
-                    for task in tasks:
-                        session = task.get("session")
-                        prompt = task.get("prompt", "")
-                        started_at = task.get("started_at", 0.0)
-                        status = task.get("status", "running")
-                        
-                        import time
-                        elapsed = ""
-                        if started_at > 0:
-                            sec = int(time.time() - started_at)
-                            if sec < 60:
-                                elapsed = f"{sec}s ago"
-                            else:
-                                elapsed = f"{sec//60}m {sec%60}s ago"
-                        
-                        status_prefix = f"[{status.capitalize()}] "
-                        item = QListWidgetItem(f"{status_prefix}{session} ({elapsed})\n↳ {prompt[:60]}...")
-                        item.setData(Qt.ItemDataRole.UserRole, task)
-                        
-                        # Style based on status
-                        from PySide6.QtGui import QColor
-                        if status == "running":
-                            item.setForeground(QColor("#60A5FA"))
-                        elif status == "completed":
-                            item.setForeground(QColor("#34D399"))
-                        elif status == "failed":
-                            item.setForeground(QColor("#F87171"))
-                        elif status == "cancelled":
-                            item.setForeground(QColor("#9CA3AF"))
-                            
-                        self.tasks_list_widget.addItem(item)
+                for task in tasks:
+                    session = task.get("session")
+                    prompt = task.get("prompt", "")
+                    started_at = task.get("started_at", 0.0)
+                    status = task.get("status", "running")
                     
-                    if selected_row >= 0 and selected_row < self.tasks_list_widget.count():
-                        self.tasks_list_widget.setCurrentRow(selected_row)
-                    else:
-                        self.tasks_list_widget.setCurrentRow(0)
+                    import time
+                    elapsed = ""
+                    if started_at > 0:
+                        sec = int(time.time() - started_at)
+                        if sec < 60:
+                            elapsed = f"{sec}s ago"
+                        else:
+                            elapsed = f"{sec//60}m {sec%60}s ago"
+                    
+                    status_prefix = f"[{status.capitalize()}] "
+                    item = QListWidgetItem(f"{status_prefix}{session} ({elapsed})\n↳ {prompt[:60]}...")
+                    item.setData(Qt.ItemDataRole.UserRole, task)
+                    
+                    # Style based on status
+                    from PySide6.QtGui import QColor
+                    if status == "running":
+                        item.setForeground(QColor("#60A5FA"))
+                    elif status == "completed":
+                        item.setForeground(QColor("#34D399"))
+                    elif status == "failed":
+                        item.setForeground(QColor("#F87171"))
+                    elif status == "cancelled":
+                        item.setForeground(QColor("#9CA3AF"))
+                        
+                    self.tasks_list_widget.addItem(item)
+                
+                if selected_row >= 0 and selected_row < self.tasks_list_widget.count():
+                    self.tasks_list_widget.setCurrentRow(selected_row)
+                else:
+                    self.tasks_list_widget.setCurrentRow(0)
             else:
                 for i in range(self.tasks_list_widget.count()):
                     item = self.tasks_list_widget.item(i)
