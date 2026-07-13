@@ -20,6 +20,9 @@ dependencies = [
     "soundfile>=0.14.0",
     "torch",
     "vosk>=0.3.45",
+    "google-auth>=2.29.0",
+    "google-auth-oauthlib>=1.2.0",
+    "google-api-python-client>=2.125.0",
 ]
 
 [[tool.uv.index]]

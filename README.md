@@ -170,6 +170,13 @@ Elora settings are stored dynamically in `~/.config/elora/config.json`. You can 
 ### Hugging Face Space Warmup
 Free Hugging Face Spaces on default tiers automatically suspend after 48 hours of inactivity. To prevent the cold-start delay from affecting your first speech request, the Elora daemon automatically initiates an asynchronous warmup routine for your Space in the background when the daemon boots or receives a preload request.
 
+### Google Classroom Integration Setup
+Elora includes an autonomous Google Classroom assignment helper capable of fetching active assignments, tracking upcoming due dates, and downloading Google Drive worksheets/attachments to summarize tasks.
+
+To configure this skill:
+1. Create a Desktop Application OAuth credential inside the [Google Cloud Console](https://console.cloud.google.com/) with Classroom & Drive read-only scopes.
+2. Download the JSON credentials file and save it exactly as `~/.config/elora/classroom_credentials.json`.
+3. The first time Elora runs a classroom command (e.g. `"What homework is due soon?"`), a browser window will automatically launch for authentication. Once authorized, Elora will save the refresh token to `~/.config/elora/classroom_token.json` for continuous background access.
 
 ---
 
@@ -177,10 +184,19 @@ Free Hugging Face Spaces on default tiers automatically suspend after 48 hours o
 
 *   [main.py](file:///home/usoy/Documents/antigravity/elora/main.py) — Core CLI listener and loop router.
 *   **`elora/`** (Package):
-    *   [elora/brain.py](file:///home/usoy/Documents/antigravity/elora/elora/brain.py) — Connects to Gemini API, handles prompts, and enforces JSON action schemas.
-    *   [elora/actions.py](file:///home/usoy/Documents/antigravity/elora/elora/actions.py) — Manages browser redirection and unique `tmux` session spawning.
-    *   [elora/news.py](file:///home/usoy/Documents/antigravity/elora/elora/news.py) — Lightweight RSS news engine using `feedparser`.
-    *   [elora/voice.py](file:///home/usoy/Documents/antigravity/elora/elora/voice.py) — Cloud-based voice synthesis using Gemini API and ALSA/mpv playback.
-    *   [elora/stt.py](file:///home/usoy/Documents/antigravity/elora/elora/stt.py) — Local raw audio recorder with RMS silence auto-detection.
-    *   [elora/hud.py](file:///home/usoy/Documents/antigravity/elora/elora/hud.py) — Centralized PySide6 UI card widget overlay supporting Spacebar Hold-to-Talk and configuration settings.
-    *   [elora/utils.py](file:///home/usoy/Documents/antigravity/elora/elora/utils.py) — Linux desktop notifications and sound effects.
+    *   **`core/`**:
+        *   [brain.py](file:///home/usoy/Documents/antigravity/elora/elora/core/brain.py) — Connects to Gemini API, handles prompts, and enforces JSON action schemas.
+        *   [agent.py](file:///home/usoy/Documents/antigravity/elora/elora/core/agent.py) — Manages the multi-turn ReAct reasoning loop and tool execution.
+        *   [config.py](file:///home/usoy/Documents/antigravity/elora/elora/core/config.py) — Dynamic user configuration manager.
+        *   [memory.py](file:///home/usoy/Documents/antigravity/elora/elora/core/memory.py) — Semantic memory store and recall context manager.
+    *   **`skills/`**:
+        *   [classroom.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/classroom.py) — Google Classroom coursework, submissions, and Google Drive attachment parsing.
+        *   [email.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/email.py) — Local IMAP email fetcher and reporting engine.
+        *   [skills.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/skills.py) — DuckDuckGo search and BeautifulSoup web scraping helper.
+        *   [browser_control.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/browser_control.py) — Remote CDP control of Brave browser instances.
+        *   [os_control.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/os_control.py) — universal mouse cursor and keyboard shortcuts simulation.
+        *   [system_skills.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/system_skills.py) — OS audio controls, brightness, and application launch helpers.
+        *   [voice.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/voice.py) — TTS voice synthesis routing (Kokoro speech).
+        *   [stt.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/stt.py) — RMS audio threshold listening and STT WAV recording.
+    *   [utils.py](file:///home/usoy/Documents/antigravity/elora/elora/utils.py) — Desktop notifications and chime playbacks.
+    *   [hud.py](file:///home/usoy/Documents/antigravity/elora/elora/hud.py) — PySide6 desktop transparent HUD dashboard and setting tab manager.

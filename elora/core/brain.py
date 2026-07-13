@@ -84,7 +84,7 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
     allowed_actions = ["antigravity", "browser", "news_fetch", "reply",
                         "memory_store", "memory_recall", "memory_focus", "memory_forget",
                         "browser_browse", "browser_click", "browser_type", "browser_get_elements",
-                        "desktop_input", "system_control"]
+                        "desktop_input", "system_control", "classroom_query"]
     guidelines = [
         "4. Use 'antigravity' for coding, workspace automation, or heavy calculations. Provide a conversational message in 'message' explaining what you are delegating.",
         "5. Use 'browser' to open a webpage on the user's desktop browser (e.g. \"open github.com\") using default xdg-open.",
@@ -120,13 +120,17 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
         allowed_actions.append("email_fetch_summary")
         guidelines.append("21. For any email-related requests (e.g., checking, reading, summarizing, or searching emails), you MUST first use 'email_fetch_summary' to retrieve the mailbox content. Do NOT attempt to open the browser or search the web for emails unless this tool fails or is disabled.")
         
+    # Classroom Guidelines integration
+    allowed_actions.append("classroom_query")
+    guidelines.append("22. For any Google Classroom, assignment, coursework, deadline, or student submission requests, you MUST first use 'classroom_query' with: 'mode' set to 'list_pending' (for all pending/missing assignments), 'due_soon' (for assignments due within 7 days), or 'analyze_materials' (to download/analyze worksheet attachments, which requires both 'course_id' and 'coursework_id' arguments). Do NOT attempt to open the browser or search the web for these unless the tool fails.")
+
     guidelines_str = "\n".join(guidelines)
     
     return f"""{custom_prompt}
-
-Guidelines:
-{guidelines_str}
-"""
+ 
+ Guidelines:
+ {guidelines_str}
+ """
 
 # Dict-based JSON Schema for Elora action response
 ELORA_RESPONSE_SCHEMA = {
@@ -147,7 +151,9 @@ ELORA_RESPONSE_SCHEMA = {
                 "url": {"type": "STRING", "description": "For 'browser', 'browser_browse', or 'web_scrape', the URL to open or fetch."},
                 "query": {"type": "STRING", "description": "For 'web_search', 'memory_recall', 'memory_focus', 'memory_forget' — the search query or topic."},
                 "command": {"type": "STRING", "description": "For 'command_run', the local shell command to execute."},
-                "mode": {"type": "STRING", "description": "For 'news_fetch', either 'skim' or 'deep_dive'."},
+                "mode": {"type": "STRING", "description": "For 'news_fetch' ('skim' or 'deep_dive') or 'classroom_query' ('list_pending', 'due_soon', 'analyze_materials')."},
+                "course_id": {"type": "STRING", "description": "For 'classroom_query', the Classroom course ID (required for analyze_materials)."},
+                "coursework_id": {"type": "STRING", "description": "For 'classroom_query', the Classroom coursework ID (required for analyze_materials)."},
                 "index": {"type": "INTEGER", "description": "For 'news_fetch' with mode='deep_dive', the 1-based integer index of the article to open."},
                 "text": {"type": "STRING", "description": "For 'memory_store', 'browser_type', or 'desktop_input' (text/shortcut to type)."},
                 "topic": {"type": "STRING", "description": "For 'memory_store', a short lowercase topic label (e.g. 'linux', 'projects')."},

@@ -10,6 +10,7 @@ from typing import Dict, Any, List, Callable, Optional
 from elora.core.brain import query_elora
 from elora.skills.skills import search_duckduckgo, scrape_webpage, run_local_command
 from elora.skills.email import fetch_recent_emails
+from elora.skills.classroom import fetch_classroom_data
 from elora.skills.browser_control import execute_browser_action
 from elora.skills.os_control import move_mouse_smoothly, click_mouse_at, type_keyboard_text
 from elora.skills.system_skills import set_system_volume, set_system_brightness, perform_window_action, launch_application
@@ -160,14 +161,36 @@ def run_agent_loop(
             
         # Report tool start
         if action in ("web_search", "web_scrape", "command_run", "browser_browse", "browser_click",
-                      "browser_type", "browser_get_elements", "desktop_input", "system_control", "email_fetch_summary"):
+                      "browser_type", "browser_get_elements", "desktop_input", "system_control", "email_fetch_summary", "classroom_query"):
             _report_status({
                 "type": "tool_start",
                 "tool": action,
                 "arguments": args
             })
             
-        if action == "email_fetch_summary":
+        if action == "classroom_query":
+            mode_val = args.get("mode", "list_pending")
+            cw_id = args.get("coursework_id")
+            c_id = args.get("course_id")
+            
+            logger.info("Executing classroom query with mode %s", mode_val)
+            classroom_result = fetch_classroom_data(mode=mode_val, coursework_id=cw_id, course_id=c_id)
+            
+            _report_status({
+                "type": "tool_output",
+                "tool": "classroom_query",
+                "arguments": args,
+                "output": classroom_result
+            })
+            
+            # Feed back to the LLM context
+            loop_history.append({"role": "user", "content": f"System Tool Output (classroom_query):\n{classroom_result}"})
+            current_prompt = (
+                f"Analyze the retrieved Classroom data for mode '{mode_val}' and formulate your next response or action. "
+                "Ensure your reply is highly conversational, clear, flowing, and directly answers what the user asked."
+            )
+
+        elif action == "email_fetch_summary":
             status_msg = "Fetching unread or recent emails..."
             logger.info(status_msg)
             
