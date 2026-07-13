@@ -48,13 +48,18 @@ def launch_brave_with_debugging() -> bool:
 
     logger.info("Launching Brave browser with remote debugging...")
     try:
+        # Use a separate user data directory so it doesn't conflict with existing running Brave instances
+        user_data_dir = os.path.expanduser("~/.config/elora/brave_profile")
+        os.makedirs(user_data_dir, exist_ok=True)
+
         # Launch Brave as a completely detached background process group
         subprocess.Popen(
-            [brave_path, "--remote-debugging-port=9222", "--no-first-run"],
+            [brave_path, "--remote-debugging-port=9222", "--no-first-run", f"--user-data-dir={user_data_dir}"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             preexec_fn=os.setpgrp
         )
+
 
         # Wait up to 6 seconds for port to open
         for _ in range(30):

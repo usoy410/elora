@@ -150,3 +150,34 @@ def save_config(config_updates: Dict[str, Any]) -> None:
         logger.error("Failed to save configuration: %s", e)
 
 
+HISTORY_PATH = os.path.join(CONFIG_DIR, "session_history.json")
+
+def load_session_history(limit: int = 20) -> list:
+    """
+    Loads persistent session history from ~/.config/elora/session_history.json.
+    Bounds the returned list to the specified limit.
+    """
+    if not os.path.exists(HISTORY_PATH):
+        return []
+    try:
+        with open(HISTORY_PATH, "r") as f:
+            history = json.load(f)
+            if isinstance(history, list):
+                return history[-limit:]
+    except Exception as e:
+        logger.error("Failed to load session history from %s: %s", HISTORY_PATH, e)
+    return []
+
+def save_session_history(history: list, limit: int = 20) -> None:
+    """
+    Saves the session history list to ~/.config/elora/session_history.json.
+    """
+    try:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        with open(HISTORY_PATH, "w") as f:
+            json.dump(history[-limit:], f, indent=2)
+    except Exception as e:
+        logger.error("Failed to save session history to %s: %s", HISTORY_PATH, e)
+
+
+

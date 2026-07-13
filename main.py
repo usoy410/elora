@@ -18,18 +18,22 @@ from elora.skills.actions import execute_agent_task, open_browser_url
 from elora.skills.news import get_news_summary, open_article
 from elora.utils import send_notification
 
+from elora.core.config import load_session_history, save_session_history
+
 # Store a short message history to maintain context during interactive sessions
-session_history: List[Dict[str, str]] = []
+session_history: List[Dict[str, str]] = load_session_history(limit=20)
 
 
 def add_to_history(role: str, content: str) -> None:
     """
-    Appends a message to the history list, keeping it bounded to the last 10 entries.
+    Appends a message to the history list, keeping it bounded to the last 20 entries.
     """
     global session_history
     session_history.append({"role": role, "content": content})
-    if len(session_history) > 10:
+    if len(session_history) > 20:
         session_history.pop(0)
+    save_session_history(session_history, limit=20)
+
 
 
 def process_action(payload: Dict[str, any]) -> None:
@@ -65,10 +69,25 @@ def process_action(payload: Dict[str, any]) -> None:
         elif mode == "deep_dive":
             idx = args.get("index")
             if idx is not None:
+                add_to_history("assistant", json.dumps(payload))
+                from elora.skills.news import _article_cache
+                try:
+                    article_idx = int(idx) - 1
+                    article = _article_cache[article_idx] if _article_cache else {}
+                    title = article.get("title", "the article")
+                    url = article.get("link", "")
+                except Exception:
+                    title, url = "the article", ""
+
                 print(f"\nElora: Opening article number {idx} in your browser...")
                 success = open_article(int(idx))
                 if success:
                     print("Elora: Browser launched successfully.\n")
+                    if url:
+                        add_to_history(
+                            "user",
+                            f"[System info: Opened news article titled '{title}' (URL: {url}).]"
+                        )
                 else:
                     print("Elora: Failed to open article. Please check the index number.\n")
             else:
@@ -76,11 +95,16 @@ def process_action(payload: Dict[str, any]) -> None:
                 
     elif action == "browser":
         url = args.get("url", "")
+        add_to_history("assistant", json.dumps(payload))
         if url:
             print(f"\nElora: Opening website {url}...")
             success = open_browser_url(url)
             if success:
                 print("Elora: Navigation requested.\n")
+                add_to_history(
+                    "user",
+                    f"[System info: Navigated browser to {url}.]"
+                )
             else:
                 print("Elora: Unable to launch default web browser.\n")
         else:
@@ -97,6 +121,7 @@ def process_action(payload: Dict[str, any]) -> None:
                     message = "I am launching the background agent to start the task. I will let you know once it is complete."
             
             print(f"\nElora: {message}\n")
+            add_to_history("assistant", json.dumps(payload))
             
             # Trigger speech synthesis dynamically if enabled
             from elora.skills.voice import speak_text
@@ -163,10 +188,13 @@ def execute_single_prompt(prompt: str) -> None:
         else:
             print(f"[*] {event}")
         
+    global session_history
+    session_history = load_session_history(limit=20)
     add_to_history("user", prompt)
     
     result = run_agent_loop(prompt, session_history, print_status)
     process_action(result)
+
 
 
 def start_interactive_loop() -> None:

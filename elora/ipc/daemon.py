@@ -46,7 +46,8 @@ logging.basicConfig(
 logger = logging.getLogger("elora.daemon")
 
 SOCKET_PATH = "/tmp/elora.sock"
-session_history: List[Dict[str, str]] = []
+from elora.core.config import load_session_history, save_session_history
+session_history: List[Dict[str, str]] = load_session_history(limit=20)
 # Active focus block — injected as context prefix when set; cleared on 'clear focus'
 active_focus: str = ""
 
@@ -56,6 +57,8 @@ def add_to_history(role: str, content: str) -> None:
     session_history.append({"role": role, "content": content})
     if len(session_history) > 20:  # Expanded context history to 20 messages
         session_history.pop(0)
+    save_session_history(session_history, limit=20)
+
 
 
 # Audio chunk size in bytes. 4000 bytes = 125ms at 16kHz / 16-bit / mono.
@@ -251,8 +254,10 @@ def handle_client(conn: socket.socket):
                     elif cmd == "query_brain":
                         text = payload.get("text", "")
                         save_history = payload.get("save_history", True)
+                        session_history = load_session_history(limit=20)
                         if save_history:
                             add_to_history("user", text)
+
 
                         # If a memory focus is active, prepend it as a system context
                         effective_history = list(session_history)
@@ -545,17 +550,21 @@ def handle_client(conn: socket.socket):
                         conn.sendall((json.dumps({"status": "speaking_status", "is_speaking": is_speaking()}) + "\n").encode("utf-8"))
                         
                     elif cmd == "get_history":
+                        session_history = load_session_history(limit=20)
                         conn.sendall((json.dumps({"status": "history", "history": session_history}) + "\n").encode("utf-8"))
                         
                     elif cmd == "reset_history":
                         session_history.clear()
+                        save_session_history(session_history, limit=20)
                         conn.sendall(b'{"status": "reset"}\n')
                         
                     elif cmd == "add_history":
                         role = payload.get("role", "")
                         content = payload.get("content", "")
+                        session_history = load_session_history(limit=20)
                         add_to_history(role, content)
                         conn.sendall(b'{"status": "added"}\n')
+
 
                         
                 except Exception as e:
