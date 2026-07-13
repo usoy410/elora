@@ -91,13 +91,15 @@ def _find_new_html_files(start_time: float) -> list[str]:
 def _monitor_session(session_name: str, task_prompt: str, start_time: float) -> None:
     """
     Background worker that polls tmux to check if the session is still active.
-    When the session exits, it alerts the user via desktop notification and sound.
+    When the session exits, it updates the task status in the registry and alerts
+    the user via desktop notification and sound.
     
-    Why: Keeps Elora informed of background task completion, establishing a complete feedback loop.
+    Why: Keeps Elora informed of background task completion, establishing a complete
+    feedback loop and updating registry state dynamically.
     """
     logger.info("Started watcher thread for session: %s", session_name)
     
-    # Poll every 2 seconds
+    # Poll every 2 seconds to check if tmux session is still active
     while True:
         time.sleep(2)
         check_cmd = ["tmux", "has-session", "-t", session_name]
@@ -108,12 +110,41 @@ def _monitor_session(session_name: str, task_prompt: str, start_time: float) -> 
             
     logger.info("Watcher detected exit for session: %s", session_name)
     
+    # Reload registry to check if the task was cancelled manually
+    # Why: Avoids duplicate alerts or overwriting manual cancellations
+    registry = _load_tasks_registry()
+    if registry.get(session_name, {}).get("status") == "cancelled":
+        logger.info("Session %s was cancelled manually. Skipping completion alerts.", session_name)
+        return
+
+    # Check the exit code of agy
+    # Why: agy writes its exit code to this file before the tmux session ends,
+    # letting us distinguish between success (0) and failure (non-zero).
+    exit_file = os.path.expanduser(f"~/.config/elora/logs/{session_name}.exit")
+    exit_code = -1
+    if os.path.exists(exit_file):
+        try:
+            with open(exit_file, "r") as f:
+                exit_code = int(f.read().strip())
+        except Exception as e:
+            logger.error("Failed to read exit code from %s: %s", exit_file, e)
+            
+    status = "completed"
+    if exit_code != 0 and exit_code != -1:
+        status = "failed"
+        
+    # Update task registry status
+    if session_name in registry:
+        if registry[session_name].get("status") == "running":
+            registry[session_name]["status"] = status
+            _save_tasks_registry(registry)
+    
     # Check if any new HTML files were created/modified during the task execution
     new_htmls = _find_new_html_files(start_time)
     preview_opened = False
     opened_file_name = ""
     
-    if new_htmls:
+    if status == "completed" and new_htmls:
         # Sort by modification time descending to get the newest
         new_htmls.sort(key=lambda p: os.path.getmtime(p), reverse=True)
         target_html = new_htmls[0]
@@ -123,18 +154,24 @@ def _monitor_session(session_name: str, task_prompt: str, start_time: float) -> 
         preview_opened = open_browser_url(file_url)
     
     # Send success chime and notification
-    send_notification("Task Completed", f"The background agent finished the task: {task_prompt}")
+    if status == "completed":
+        send_notification("Task Completed", f"The background agent finished the task: {task_prompt}")
+    else:
+        send_notification("Task Failed", f"The background agent failed the task: {task_prompt}")
     play_chime()
     
     # Speak completion alert out loud dynamically
     try:
         from elora.skills.voice import speak_text
-        if preview_opened:
-            speak_text(f"Task complete. Opening the preview of {opened_file_name} in your browser.")
+        if status == "completed":
+            if preview_opened:
+                speak_text(f"Task complete. Opening the preview of {opened_file_name} in your browser.")
+            else:
+                speak_text("Task complete. The background agent finished the task.")
         else:
-            speak_text("Task complete. The background agent finished the task.")
+            speak_text("Task failed. The background agent encountered an error.")
     except Exception as e:
-        logger.error("Failed to speak task completion confirmation: %s", e)
+        logger.error("Failed to speak task completion status: %s", e)
 
 
 def _get_unique_tmux_session(base_name: str = "elora-dev") -> str:
@@ -174,10 +211,24 @@ def execute_agent_task(prompt: str) -> str:
     
     # Construct the tmux shell invocation command safely using shlex.quote
     escaped_prompt = shlex.quote(prompt)
-    cmd_str = f"{agy_path} --dangerously-skip-permissions --mode accept-edits --prompt-interactive {escaped_prompt}"
+    
+    # Define log files inside the ~/.config/elora/logs directory
+    # Why: Since tmux sessions close automatically when the running command ends (with --print),
+    # we pipe stdout/stderr through tee and log to disk so log history is preserved and accessible.
+    log_dir = os.path.expanduser("~/.config/elora/logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f"{session_name}.log")
+    exit_file = os.path.join(log_dir, f"{session_name}.exit")
+    
+    # Run agy with --print (instead of --prompt-interactive) so it exits automatically when done.
+    # We pipe outputs through tee to log_file, capture agy's exit code, write it to exit_file,
+    # and exit the shell with the same code.
+    inner_cmd = f"{agy_path} --dangerously-skip-permissions --mode accept-edits --print {escaped_prompt}"
+    bash_cmd = f"{inner_cmd} 2>&1 | tee {shlex.quote(log_file)}; exit_status=${{PIPESTATUS[0]}}; echo \\$exit_status > {shlex.quote(exit_file)}; exit \\$exit_status"
     
     # tmux command: tmux new-session -d -s session_name "cmd"
-    tmux_cmd = ["tmux", "new-session", "-d", "-s", session_name, cmd_str]
+    # We wrap in bash -c to ensure the redirection, pipe, and exit code capture logic is executed.
+    tmux_cmd = ["tmux", "new-session", "-d", "-s", session_name, f"bash -c {shlex.quote(bash_cmd)}"]
     
     try:
         logger.info("Spawning background agent task in tmux: %s", session_name)

@@ -73,10 +73,10 @@ def launch_brave_with_debugging() -> bool:
 def execute_browser_action(action_name: str, **kwargs) -> str:
     """
     Connects to Brave via CDP, performs a single action on the active page,
-    captures a screenshot, and closes the connection.
+    captures a page screenshot, and disconnects (leaving the browser open).
     
-    Why: Keeps connection stateless to prevent lockouts, and guarantees a fresh
-    screenshot update after every single interaction.
+    Why: Keeps connection stateless to prevent lockouts, guarantees a fresh
+    screenshot update after every interaction, and avoids closing the browser window.
     """
     if not launch_brave_with_debugging():
         return "Error: Brave browser is not running and could not be launched with remote debugging enabled."
@@ -135,7 +135,8 @@ def execute_browser_action(action_name: str, **kwargs) -> str:
                 except Exception as e:
                     logger.warning("Failed to take page screenshot: %s", e)
 
-            browser.close()
+            # Do not call browser.close() here as it terminates the remote browser process.
+            # The connection will close when the sync_playwright context manager exits.
             return result
     except Exception as e:
         logger.error("Browser action '%s' failed: %s", action_name, e)

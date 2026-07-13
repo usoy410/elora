@@ -20,16 +20,17 @@ CONFIG_DIR = os.path.expanduser("~/.config/elora")
 CREDENTIALS_PATH = os.path.join(CONFIG_DIR, "classroom_credentials.json")
 TOKEN_PATH = os.path.join(CONFIG_DIR, "classroom_token.json")
 
-# Required scopes for Google Classroom and Google Drive access
+# Required scopes for Google Classroom, Google Drive, and Google Calendar access
 SCOPES = [
     "https://www.googleapis.com/auth/classroom.courses.readonly",
     "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
     "https://www.googleapis.com/auth/classroom.student-submissions.me.readonly",
-    "https://www.googleapis.com/auth/drive.readonly"
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/calendar.events"
 ]
 
 
-def get_classroom_credentials() -> Optional[Credentials]:
+def get_classroom_credentials(allow_interactive: bool = True) -> Optional[Credentials]:
     """
     Retrieves OAuth 2.0 credentials from classroom_token.json or starts authentication
     flow using classroom_credentials.json if token is missing/expired.
@@ -39,6 +40,9 @@ def get_classroom_credentials() -> Optional[Credentials]:
     if os.path.exists(TOKEN_PATH):
         try:
             creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+            if creds and not all(scope in getattr(creds, 'scopes', []) for scope in SCOPES):
+                logger.info("Cached token scopes do not match requested scopes. Requesting re-authentication.")
+                creds = None
         except Exception as e:
             logger.warning("Failed to load existing classroom token: %s", e)
 
@@ -54,6 +58,10 @@ def get_classroom_credentials() -> Optional[Credentials]:
             except Exception as e:
                 logger.warning("Failed to refresh classroom credentials: %s", e)
                 creds = None
+
+        if not allow_interactive:
+            logger.info("Non-interactive mode: skipping OAuth browser flow.")
+            return None
 
         # Run complete OAuth flow
         if not os.path.exists(CREDENTIALS_PATH):
@@ -75,11 +83,11 @@ def get_classroom_credentials() -> Optional[Credentials]:
     return creds
 
 
-def get_service(service_name: str, version: str):
+def get_service(service_name: str, version: str, allow_interactive: bool = True):
     """
     Builds and returns a Google API service object.
     """
-    creds = get_classroom_credentials()
+    creds = get_classroom_credentials(allow_interactive=allow_interactive)
     if not creds:
         return None
     return build(service_name, version, credentials=creds)
@@ -280,3 +288,245 @@ def fetch_classroom_data(mode: str = "list_pending", coursework_id: Optional[str
     except Exception as e:
         logger.error("Failed to fetch Classroom data: %s", e)
         return f"Error connecting to Google Classroom: {str(e)}"
+
+
+def get_pending_assignments_raw() -> Optional[List[Dict[str, Any]]]:
+    """
+    Fetches all pending assignments (not TURNED_IN or RETURNED) across active courses.
+    Returns raw dictionaries containing assignment and course details, or None if connection failed.
+    """
+    classroom = get_service("classroom", "v1", allow_interactive=False)
+    if not classroom:
+        logger.warning("Google Classroom service initialization failed.")
+        return None
+
+    try:
+        courses_res = classroom.courses().list(studentId="me", courseStates="ACTIVE").execute()
+        courses = courses_res.get("courses", [])
+        if not courses:
+            return []
+
+        pending_list = []
+        for course in courses:
+            cid = course["id"]
+            cname = course["name"]
+            
+            try:
+                work_res = classroom.courses().courseWork().list(courseId=cid).execute()
+                coursework_list = work_res.get("courseWork", [])
+            except Exception as e:
+                logger.warning("Failed to list coursework for course %s: %s", cname, e)
+                continue
+                
+            if not coursework_list:
+                continue
+            
+            try:
+                sub_res = classroom.courses().courseWork().studentSubmissions().list(
+                    courseId=cid, courseWorkId="-", userId="me"
+                ).execute()
+                submissions = {sub["courseWorkId"]: sub for sub in sub_res.get("studentSubmissions", [])}
+            except Exception as e:
+                logger.warning("Failed to list student submissions for course %s: %s", cname, e)
+                submissions = {}
+            
+            for work in coursework_list:
+                wid = work["id"]
+                title = work["title"]
+                desc = work.get("description", "")
+                
+                sub = submissions.get(wid)
+                sub_state = sub.get("state", "ASSIGNED") if sub else "ASSIGNED"
+                
+                if sub_state in ("TURNED_IN", "RETURNED"):
+                    continue
+                    
+                due_date_raw = work.get("dueDate")
+                due_time_raw = work.get("dueTime")
+                due_dt = parse_classroom_date(due_date_raw, due_time_raw)
+                due_str = due_dt.isoformat() if due_dt else None
+                
+                pending_list.append({
+                    "course_name": cname,
+                    "course_id": cid,
+                    "id": wid,
+                    "title": title,
+                    "description": desc,
+                    "due_date": due_str,
+                    "state": sub_state
+                })
+        return pending_list
+    except Exception as e:
+        logger.error("Error fetching raw classroom pending assignments: %s", e)
+        return None
+
+
+def sync_assignment_to_calendar(assignment: Dict[str, Any]) -> bool:
+    """
+    Syncs a single assignment to the user's primary Google Calendar as a 1-hour event ending at the due date.
+    Uses a deterministic event ID to prevent duplicates.
+    """
+    calendar_service = get_service("calendar", "v3", allow_interactive=False)
+    if not calendar_service:
+        logger.warning("Google Calendar service initialization failed.")
+        return False
+        
+    due_date_str = assignment.get("due_date")
+    if not due_date_str:
+        # Assignment has no due date, skip calendar sync
+        return False
+        
+    try:
+        due_dt = datetime.datetime.fromisoformat(due_date_str)
+        # Create a 1-hour event ending at the due time
+        start_dt = due_dt - datetime.timedelta(hours=1)
+        
+        # Event ID must be 5-1024 characters, letters/digits/hyphens/underscores
+        event_id = f"eloraclassroom{assignment['id']}"
+        
+        event_body = {
+            "id": event_id,
+            "summary": f"Classroom: {assignment['title']}",
+            "location": assignment["course_name"],
+            "description": assignment.get("description", "No instructions provided."),
+            "start": {
+                "dateTime": start_dt.isoformat(),
+                "timeZone": "UTC" if due_dt.tzinfo is None else None
+            },
+            "end": {
+                "dateTime": due_dt.isoformat(),
+                "timeZone": "UTC" if due_dt.tzinfo is None else None
+            },
+            "reminders": {
+                "useDefault": False,
+                "overrides": [
+                    {"method": "popup", "minutes": 1440}, # 1 day before
+                    {"method": "popup", "minutes": 120}   # 2 hours before
+                ]
+            }
+        }
+        
+        try:
+            # Check if event already exists
+            calendar_service.events().get(calendarId="primary", eventId=event_id).execute()
+            # Update event details if it exists
+            calendar_service.events().update(calendarId="primary", eventId=event_id, body=event_body).execute()
+            logger.info("Updated Google Calendar event for coursework %s", assignment['id'])
+        except Exception as get_err:
+            # If not found (HTTP 404), insert it
+            if "not found" in str(get_err).lower() or "404" in str(get_err):
+                calendar_service.events().insert(calendarId="primary", body=event_body).execute()
+                logger.info("Created new Google Calendar event for coursework %s", assignment['id'])
+            else:
+                logger.error("Failed to check/update event %s: %s", event_id, get_err)
+                return False
+        return True
+    except Exception as e:
+        logger.error("Failed to sync assignment %s to Google Calendar: %s", assignment['id'], e)
+        return False
+
+
+def save_classroom_document(content: str, filename: str, file_format: str = "md") -> str:
+    """
+    Saves a text document (e.g. study guide or response draft) in TXT, MD, or PDF format.
+    Saves to the user's Documents/Elora_Classroom folder.
+    Returns a success message with the file path or an error.
+    """
+    # Create the target directory
+    doc_dir = os.path.expanduser("~/Documents/Elora_Classroom")
+    try:
+        os.makedirs(doc_dir, exist_ok=True)
+    except Exception as e:
+        return f"Error: Failed to create target directory {doc_dir}: {e}"
+        
+    # Clean filename
+    filename = "".join(c for c in filename if c.isalnum() or c in (".", "_", "-")).strip()
+    if not filename:
+        filename = "classroom_document"
+        
+    # Append appropriate extension if not already present
+    ext = f".{file_format.lower()}"
+    if not filename.lower().endswith(ext):
+        filename += ext
+        
+    output_path = os.path.join(doc_dir, filename)
+    file_format = file_format.lower()
+    
+    if file_format in ("md", "txt"):
+        try:
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            return f"Successfully saved document to: {output_path}"
+        except Exception as e:
+            return f"Error saving document: {e}"
+            
+    elif file_format == "pdf":
+        try:
+            from reportlab.lib.pagesizes import letter
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            
+            doc = SimpleDocTemplate(output_path, pagesize=letter, rightMargin=54, leftMargin=54, topMargin=54, bottomMargin=54)
+            styles = getSampleStyleSheet()
+            
+            # Custom styled title and body
+            styles.add(ParagraphStyle(
+                name='CustomTitle',
+                parent=styles['Title'],
+                fontName='Helvetica-Bold',
+                fontSize=20,
+                spaceAfter=15
+            ))
+            styles.add(ParagraphStyle(
+                name='CustomBody',
+                parent=styles['Normal'],
+                fontName='Helvetica',
+                fontSize=10,
+                leading=14,
+                spaceAfter=8
+            ))
+            styles.add(ParagraphStyle(
+                name='CustomHeading2',
+                parent=styles['Heading2'],
+                fontName='Helvetica-Bold',
+                fontSize=14,
+                spaceBefore=12,
+                spaceAfter=6
+            ))
+            
+            story = []
+            lines = content.splitlines()
+            for line in lines:
+                line_strip = line.strip()
+                if not line_strip:
+                    story.append(Spacer(1, 8))
+                    continue
+                    
+                # Basic markdown header processing
+                if line_strip.startswith("# "):
+                    story.append(Paragraph(line_strip[2:], styles['CustomTitle']))
+                elif line_strip.startswith("## "):
+                    story.append(Paragraph(line_strip[3:], styles['CustomHeading2']))
+                elif line_strip.startswith("### "):
+                    story.append(Paragraph(line_strip[4:], styles['Heading3']))
+                else:
+                    clean_text = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    story.append(Paragraph(clean_text, styles['CustomBody']))
+                    
+            doc.build(story)
+            return f"Successfully saved PDF document to: {output_path}"
+        except ImportError:
+            # Fallback to saving markdown
+            md_path = os.path.splitext(output_path)[0] + ".md"
+            try:
+                with open(md_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                return f"Notice: 'reportlab' is missing. Saved as Markdown instead to: {md_path}"
+            except Exception as e:
+                return f"Error: reportlab is missing and fallback Markdown save failed: {e}"
+        except Exception as e:
+            return f"Error generating PDF: {e}"
+            
+    else:
+        return f"Error: Unsupported format '{file_format}'. Must be 'txt', 'md', or 'pdf'."
+

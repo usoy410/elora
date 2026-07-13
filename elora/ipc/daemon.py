@@ -412,7 +412,7 @@ def handle_client(conn: socket.socket):
                     elif cmd == "list_tasks":
                         try:
                             # 1. Query active tmux sessions
-                            active_sessions = []
+                            active_sessions = set()
                             try:
                                 output = subprocess.check_output(["tmux", "list-sessions"], stderr=subprocess.DEVNULL).decode()
                                 for line in output.strip().split("\n"):
@@ -421,24 +421,58 @@ def handle_client(conn: socket.socket):
                                         if parts:
                                             sname = parts[0].strip()
                                             if sname.startswith("elora-dev"):
-                                                active_sessions.append(sname)
+                                                active_sessions.add(sname)
                             except Exception:
                                 pass
                             
                             # 2. Match with registry
-                            from elora.skills.actions import _load_tasks_registry
+                            from elora.skills.actions import _load_tasks_registry, _save_tasks_registry
                             registry = _load_tasks_registry()
                             
-                            tasks_list = []
-                            for session in active_sessions:
-                                info = registry.get(session, {})
-                                tasks_list.append({
-                                    "session": session,
+                            # Automatically sync tasks that ended while the daemon wasn't active
+                            changed = False
+                            for sname, info in list(registry.items()):
+                                if info.get("status") == "running" and sname not in active_sessions:
+                                    exit_file = os.path.expanduser(f"~/.config/elora/logs/{sname}.exit")
+                                    status = "completed"
+                                    if os.path.exists(exit_file):
+                                        try:
+                                            with open(exit_file, "r") as f:
+                                                exit_code = int(f.read().strip())
+                                                if exit_code != 0:
+                                                    status = "failed"
+                                        except Exception:
+                                            pass
+                                    info["status"] = status
+                                    changed = True
+                                    
+                            if changed:
+                                _save_tasks_registry(registry)
+                                
+                            # 3. Separate active and finished tasks
+                            running_tasks = []
+                            historical_tasks = []
+                            for sname, info in registry.items():
+                                task_info = {
+                                    "session": sname,
                                     "prompt": info.get("prompt", "Unknown background agent task"),
                                     "started_at": info.get("started_at", 0.0),
-                                    "status": info.get("status", "running")
-                                })
-                                
+                                    "status": info.get("status", "completed")
+                                }
+                                # Double check active tmux state
+                                if sname in active_sessions:
+                                    task_info["status"] = "running"
+                                    running_tasks.append(task_info)
+                                else:
+                                    historical_tasks.append(task_info)
+                                    
+                            # Sort by start time descending
+                            running_tasks.sort(key=lambda t: t["started_at"], reverse=True)
+                            historical_tasks.sort(key=lambda t: t["started_at"], reverse=True)
+                            
+                            # Combine, capping history at 15
+                            tasks_list = running_tasks + historical_tasks[:15]
+                            
                             conn.sendall((json.dumps({"status": "tasks_list", "tasks": tasks_list}) + "\n").encode("utf-8"))
                         except Exception as e:
                             logger.error("Failed to list tasks: %s", e)
@@ -458,28 +492,34 @@ def handle_client(conn: socket.socket):
                         if session_name:
                             log_text = ""
                             try:
-                                # Capture pane from tmux session (first window, first pane)
+                                # 1. Try to capture from active tmux session
                                 capture_cmd = ["tmux", "capture-pane", "-pt", session_name]
                                 res = subprocess.run(capture_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                                 if res.returncode == 0:
                                     log_text = res.stdout.decode("utf-8", errors="replace")
                                 else:
-                                    # Check if the tmux session actually exists.
-                                    # Why: Avoids confusing "exit status 1" errors when a task completes or has not fully initialized.
-                                    check_cmd = ["tmux", "has-session", "-t", session_name]
-                                    check_res = subprocess.run(check_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                                    if check_res.returncode != 0:
-                                        log_text = "Task completed or session not found."
+                                    # 2. Try reading from disk log file if tmux session ended
+                                    log_file = os.path.expanduser(f"~/.config/elora/logs/{session_name}.log")
+                                    if os.path.exists(log_file):
+                                        with open(log_file, "r", errors="replace") as f:
+                                            log_text = f.read()
                                     else:
-                                        stderr_msg = res.stderr.decode("utf-8", errors="replace").strip()
-                                        if "can't find pane" in stderr_msg or "no pane" in stderr_msg:
-                                            log_text = "Initializing task..."
-                                        elif "no server running" in stderr_msg:
-                                            log_text = "Tmux server is not running."
+                                        # Check if the tmux session actually exists.
+                                        # Why: Avoids confusing "exit status 1" errors when a task completes or has not fully initialized.
+                                        check_cmd = ["tmux", "has-session", "-t", session_name]
+                                        check_res = subprocess.run(check_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                        if check_res.returncode != 0:
+                                            log_text = "Task completed or session not found."
                                         else:
-                                            log_text = f"Waiting for task log output... ({stderr_msg})"
+                                            stderr_msg = res.stderr.decode("utf-8", errors="replace").strip()
+                                            if "can't find pane" in stderr_msg or "no pane" in stderr_msg:
+                                                log_text = "Initializing task..."
+                                            elif "no server running" in stderr_msg:
+                                                log_text = "Tmux server is not running."
+                                            else:
+                                                log_text = f"Waiting for task log output... ({stderr_msg})"
                             except Exception as e:
-                                log_text = f"Error capturing pane: {e}"
+                                log_text = f"Error capturing pane/log: {e}"
                             conn.sendall((json.dumps({"status": "task_log", "session": session_name, "log": log_text}) + "\n").encode("utf-8"))
                         else:
                             conn.sendall(b'{"status": "error", "message": "Missing session name"}\n')
@@ -532,6 +572,129 @@ def handle_client(conn: socket.socket):
         conn.close()
 
 
+def classroom_scheduler_loop():
+    """
+    Background loop that polls Google Classroom for new assignments and upcoming deadlines.
+    Syncs them to Google Calendar if enabled, and pushes desktop notifications.
+    """
+    import datetime
+    logger.info("Classroom background scheduler thread started.")
+    
+    # Wait for daemon startup to settle
+    time.sleep(10)
+    
+    from elora.skills.classroom import TOKEN_PATH, get_pending_assignments_raw, sync_assignment_to_calendar
+    from elora.utils import send_notification
+    from elora.skills.voice import speak_text
+    
+    CACHE_PATH = os.path.expanduser("~/.config/elora/classroom_cache.json")
+    
+    # Main polling loop
+    while True:
+        try:
+            # Check if oauth token exists. If not, do not poll to avoid consent screen in background.
+            if not os.path.exists(TOKEN_PATH):
+                logger.debug("Classroom token not found. Skipping polling cycle.")
+                time.sleep(1800)
+                continue
+                
+            logger.info("Starting Classroom scheduler check...")
+            
+            # Fetch raw pending coursework items
+            assignments = get_pending_assignments_raw()
+            if assignments is None:
+                logger.info("Classroom API connection offline or credentials invalid. Skipping cycle.")
+                time.sleep(1800)
+                continue
+                
+            # Load existing notification cache
+            cache = {}
+            if os.path.exists(CACHE_PATH):
+                try:
+                    with open(CACHE_PATH, "r") as f:
+                        cache = json.load(f)
+                except Exception as e:
+                    logger.warning("Failed to load classroom cache: %s", e)
+                    
+            cached_assignments = cache.get("assignments", {})
+            last_checked = cache.get("last_checked")
+            
+            updated_cache_assignments = {}
+            now = datetime.datetime.now()
+            
+            for assignment in assignments:
+                wid = assignment["id"]
+                title = assignment["title"]
+                course_name = assignment["course_name"]
+                due_date_str = assignment.get("due_date")
+                
+                # Check cache history
+                cached_item = cached_assignments.get(wid, {})
+                notified_created = cached_item.get("notified_created", False)
+                notified_deadline_24h = cached_item.get("notified_deadline_24h", False)
+                calendar_synced = cached_item.get("calendar_synced", False)
+                
+                # 1. Detect New Assignment
+                if last_checked and wid not in cached_assignments:
+                    msg = f"New assignment in {course_name}: {title}"
+                    logger.info("Notifying new assignment: %s", msg)
+                    send_notification("New Assignment", msg)
+                    speak_text(f"Boss, you have a new assignment in {course_name}: {title}")
+                    notified_created = True
+                elif not last_checked:
+                    notified_created = True
+                    
+                # 2. Check Upcoming Deadline (within 24 hours)
+                if due_date_str:
+                    try:
+                        due_dt = datetime.datetime.fromisoformat(due_date_str)
+                        time_left = due_dt - now
+                        if datetime.timedelta(hours=0) < time_left <= datetime.timedelta(hours=24):
+                            if not notified_deadline_24h:
+                                msg = f"Due in {int(time_left.total_seconds() // 3600)} hours: {title}"
+                                logger.info("Notifying urgent deadline: %s", msg)
+                                send_notification("Assignment Due Soon", msg)
+                                speak_text(f"Notice, boss: the assignment, {title}, is due in less than 24 hours.")
+                                notified_deadline_24h = True
+                        else:
+                            if time_left > datetime.timedelta(hours=24):
+                                notified_deadline_24h = False
+                    except Exception as date_err:
+                        logger.warning("Error parsing due date for alert check: %s", date_err)
+                        
+                # 3. Google Calendar Sync
+                if not calendar_synced and due_date_str:
+                    logger.info("Syncing assignment %s to Google Calendar...", wid)
+                    success = sync_assignment_to_calendar(assignment)
+                    if success:
+                        calendar_synced = True
+                        
+                updated_cache_assignments[wid] = {
+                    "title": title,
+                    "course_name": course_name,
+                    "due_date": due_date_str,
+                    "state": assignment["state"],
+                    "notified_created": notified_created,
+                    "notified_deadline_24h": notified_deadline_24h,
+                    "calendar_synced": calendar_synced
+                }
+                
+            # Save updated states to cache
+            cache["last_checked"] = now.isoformat()
+            cache["assignments"] = updated_cache_assignments
+            
+            os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
+            with open(CACHE_PATH, "w") as f:
+                json.dump(cache, f, indent=2)
+                
+            logger.info("Classroom scheduler check completed successfully.")
+            
+        except Exception as e:
+            logger.error("Error in classroom scheduler cycle: %s", e)
+            
+        time.sleep(1800)
+
+
 def run_daemon():
     """Starts the Unix socket daemon server."""
     if os.path.exists(SOCKET_PATH):
@@ -553,6 +716,12 @@ def run_daemon():
         threading.Thread(target=preload_voice_model, name="EloraVoicePreloadThread", daemon=True).start()
     except Exception as e:
         logger.error("Failed to initiate voice model preloading: %s", e)
+
+    # Start background classroom scheduler thread
+    try:
+        threading.Thread(target=classroom_scheduler_loop, name="ClassroomSchedulerThread", daemon=True).start()
+    except Exception as e:
+        logger.error("Failed to start classroom scheduler thread: %s", e)
 
     try:
         while True:

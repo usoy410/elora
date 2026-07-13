@@ -1467,11 +1467,11 @@ class EloraHUD(QWidget):
                 self.txt_task_log.clear()
                 self.btn_cancel_task.setEnabled(False)
             else:
-                self.btn_cancel_task.setEnabled(True)
                 for task in tasks:
                     session = task.get("session")
                     prompt = task.get("prompt", "")
                     started_at = task.get("started_at", 0.0)
+                    status = task.get("status", "running")
                     
                     import time
                     elapsed = ""
@@ -1482,15 +1482,44 @@ class EloraHUD(QWidget):
                         else:
                             elapsed = f"{sec//60}m {sec%60}s ago"
                     
-                    item = QListWidgetItem(f"{session} ({elapsed})\n↳ {prompt[:60]}...")
+                    status_prefix = f"[{status.capitalize()}] "
+                    item = QListWidgetItem(f"{status_prefix}{session} ({elapsed})\n↳ {prompt[:60]}...")
                     item.setData(Qt.ItemDataRole.UserRole, task)
+                    
+                    # Style item according to task status
+                    from PySide6.QtGui import QColor
+                    if status == "running":
+                        item.setForeground(QColor("#60A5FA")) # Sleek light blue
+                    elif status == "completed":
+                        item.setForeground(QColor("#34D399")) # Sleek green
+                    elif status == "failed":
+                        item.setForeground(QColor("#F87171")) # Sleek red
+                    elif status == "cancelled":
+                        item.setForeground(QColor("#9CA3AF")) # Sleek gray
+                        
                     self.tasks_list_widget.addItem(item)
+                
+                # Automatically select the first item and trigger selection check
+                self.tasks_list_widget.setCurrentRow(0)
+                self.on_task_selection_changed()
         else:
             self.tasks_list_widget.addItem(f"Error: {res.get('message', 'Failed to connect to daemon.')}")
             self.btn_cancel_task.setEnabled(False)
 
     def on_task_selection_changed(self):
         """Called when a task is selected in the list widget. Fetches log immediately."""
+        selected_items = self.tasks_list_widget.selectedItems()
+        if selected_items:
+            item = selected_items[0]
+            task = item.data(Qt.ItemDataRole.UserRole)
+            if task:
+                # Enable Cancel button only if the task is currently running
+                is_running = task.get("status") == "running"
+                self.btn_cancel_task.setEnabled(is_running)
+            else:
+                self.btn_cancel_task.setEnabled(False)
+        else:
+            self.btn_cancel_task.setEnabled(False)
         self.update_task_log_view()
 
     def update_task_log_view(self):
@@ -1623,11 +1652,11 @@ class EloraHUD(QWidget):
                     self.txt_task_log.clear()
                     self.btn_cancel_task.setEnabled(False)
                 else:
-                    self.btn_cancel_task.setEnabled(True)
                     for task in tasks:
                         session = task.get("session")
                         prompt = task.get("prompt", "")
                         started_at = task.get("started_at", 0.0)
+                        status = task.get("status", "running")
                         
                         import time
                         elapsed = ""
@@ -1638,12 +1667,27 @@ class EloraHUD(QWidget):
                             else:
                                 elapsed = f"{sec//60}m {sec%60}s ago"
                         
-                        item = QListWidgetItem(f"{session} ({elapsed})\n↳ {prompt[:60]}...")
+                        status_prefix = f"[{status.capitalize()}] "
+                        item = QListWidgetItem(f"{status_prefix}{session} ({elapsed})\n↳ {prompt[:60]}...")
                         item.setData(Qt.ItemDataRole.UserRole, task)
+                        
+                        # Style based on status
+                        from PySide6.QtGui import QColor
+                        if status == "running":
+                            item.setForeground(QColor("#60A5FA"))
+                        elif status == "completed":
+                            item.setForeground(QColor("#34D399"))
+                        elif status == "failed":
+                            item.setForeground(QColor("#F87171"))
+                        elif status == "cancelled":
+                            item.setForeground(QColor("#9CA3AF"))
+                            
                         self.tasks_list_widget.addItem(item)
                     
                     if selected_row >= 0 and selected_row < self.tasks_list_widget.count():
                         self.tasks_list_widget.setCurrentRow(selected_row)
+                    else:
+                        self.tasks_list_widget.setCurrentRow(0)
             else:
                 for i in range(self.tasks_list_widget.count()):
                     item = self.tasks_list_widget.item(i)
@@ -1651,6 +1695,7 @@ class EloraHUD(QWidget):
                     session = task.get("session")
                     prompt = task.get("prompt", "")
                     started_at = task.get("started_at", 0.0)
+                    status = task.get("status", "running")
                     
                     import time
                     elapsed = ""
@@ -1660,10 +1705,24 @@ class EloraHUD(QWidget):
                             elapsed = f"{sec}s ago"
                         else:
                             elapsed = f"{sec//60}m {sec%60}s ago"
-                    item.setText(f"{session} ({elapsed})\n↳ {prompt[:60]}...")
+                            
+                    status_prefix = f"[{status.capitalize()}] "
+                    item.setText(f"{status_prefix}{session} ({elapsed})\n↳ {prompt[:60]}...")
                     item.setData(Qt.ItemDataRole.UserRole, task)
+                    
+                    # Style based on status
+                    from PySide6.QtGui import QColor
+                    if status == "running":
+                        item.setForeground(QColor("#60A5FA"))
+                    elif status == "completed":
+                        item.setForeground(QColor("#34D399"))
+                    elif status == "failed":
+                        item.setForeground(QColor("#F87171"))
+                    elif status == "cancelled":
+                        item.setForeground(QColor("#9CA3AF"))
             
-            self.update_task_log_view()
+            # Ensure cancel button state is updated based on active selection
+            self.on_task_selection_changed()
 
 
 _hud_lock_socket = None

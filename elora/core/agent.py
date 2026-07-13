@@ -10,7 +10,7 @@ from typing import Dict, Any, List, Callable, Optional
 from elora.core.brain import query_elora
 from elora.skills.skills import search_duckduckgo, scrape_webpage, run_local_command
 from elora.skills.email import fetch_recent_emails
-from elora.skills.classroom import fetch_classroom_data
+from elora.skills.classroom import fetch_classroom_data, save_classroom_document
 from elora.skills.browser_control import execute_browser_action
 from elora.skills.os_control import move_mouse_smoothly, click_mouse_at, type_keyboard_text
 from elora.skills.system_skills import set_system_volume, set_system_brightness, perform_window_action, launch_application
@@ -133,11 +133,8 @@ def run_agent_loop(
         action = result.get("action")
         args = result.get("arguments", {})
         
-        # Decide if the next step in the loop requires visual feedback
-        needs_screenshot = action in (
-            "browser_browse", "browser_click", "browser_type", 
-            "browser_get_elements", "desktop_input", "system_control"
-        )
+        # Decide if the next step in the loop requires visual feedback (e.g. raw desktop coordinate interaction)
+        needs_screenshot = action in ("desktop_input",)
         
         # Report reasoning thought
         if thought:
@@ -161,7 +158,7 @@ def run_agent_loop(
             
         # Report tool start
         if action in ("web_search", "web_scrape", "command_run", "browser_browse", "browser_click",
-                      "browser_type", "browser_get_elements", "desktop_input", "system_control", "email_fetch_summary", "classroom_query"):
+                      "browser_type", "browser_get_elements", "desktop_input", "system_control", "email_fetch_summary", "classroom_query", "classroom_export_doc"):
             _report_status({
                 "type": "tool_start",
                 "tool": action,
@@ -188,6 +185,27 @@ def run_agent_loop(
             current_prompt = (
                 f"Analyze the retrieved Classroom data for mode '{mode_val}' and formulate your next response or action. "
                 "Ensure your reply is highly conversational, clear, flowing, and directly answers what the user asked."
+            )
+
+        elif action == "classroom_export_doc":
+            content_val = args.get("content", "")
+            filename_val = args.get("filename", "classroom_document")
+            format_val = args.get("format", "md")
+            
+            logger.info("Executing classroom export doc to %s in %s format", filename_val, format_val)
+            export_result = save_classroom_document(content=content_val, filename=filename_val, file_format=format_val)
+            
+            _report_status({
+                "type": "tool_output",
+                "tool": "classroom_export_doc",
+                "arguments": args,
+                "output": export_result
+            })
+            
+            loop_history.append({"role": "user", "content": f"System Tool Output (classroom_export_doc):\n{export_result}"})
+            current_prompt = (
+                f"Acknowledge the document export outcome ('{export_result}') conversationally back to the user. "
+                "Confirm that it has been saved, and present a very brief outline or summary of what was generated, if relevant."
             )
 
         elif action == "email_fetch_summary":
