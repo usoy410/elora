@@ -194,6 +194,26 @@ class TaskCancelThread(QThread):
             self.task_cancelled.emit({"status": "error", "message": str(e)})
 
 
+class TaskRemoveThread(QThread):
+    """Background thread to query the daemon to remove/clear a specific task."""
+    task_removed = Signal(dict)
+
+    def __init__(self, session: str):
+        super().__init__()
+        self.session = session
+
+    def run(self):
+        try:
+            from elora.ipc.daemon_client import EloraDaemonClient
+            client = EloraDaemonClient()
+            res = client.send_cmd({"cmd": "remove_task", "session": self.session})
+            self.task_removed.emit(res)
+        except Exception as e:
+            logger.error("TaskRemoveThread error for session %s: %s", self.session, e)
+            self.task_removed.emit({"status": "error", "message": str(e)})
+
+
+
 class ScreenExplanationThread(QThread):
     """Background thread delegating screen capture and explanation to the daemon."""
     explanation_finished = Signal(dict)

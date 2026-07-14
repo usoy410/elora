@@ -27,7 +27,7 @@ from elora.ui.styles import HUD_STYLESHEET, MODAL_OVERLAY_STYLE, MODAL_CARD_STYL
 from elora.ui.threads import (
     DaemonSTTThread, DaemonQueryThread, NewsFetchThread,
     TaskListFetchThread, TaskLogFetchThread, TaskCancelThread,
-    ScreenExplanationThread, StartupGreetingThread
+    TaskRemoveThread, ScreenExplanationThread, StartupGreetingThread
 )
 from elora.ui.voice_orb import OrbWidget
 from elora.ui.hud_overlay import EloraModalOverlay
@@ -732,8 +732,15 @@ class EloraHUD(QWidget):
         self.btn_cancel_task.setStyleSheet("background-color: rgba(239, 68, 68, 0.25); border-color: rgba(239, 68, 68, 0.45); color: #F87171; font-weight: bold;")
         self.btn_cancel_task.clicked.connect(self.cancel_selected_task)
         
+        self.btn_clear_task = QPushButton("Clear Task", self)
+        self.btn_clear_task.setIcon(QIcon.fromTheme("edit-clear"))
+        self.btn_clear_task.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_clear_task.setStyleSheet("background-color: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.15); color: #E5E7EB;")
+        self.btn_clear_task.clicked.connect(self.clear_selected_task)
+        
         self.tasks_actions_layout.addWidget(self.btn_refresh_tasks)
         self.tasks_actions_layout.addWidget(self.btn_cancel_task)
+        self.tasks_actions_layout.addWidget(self.btn_clear_task)
         self.tasks_layout.addWidget(self.tasks_actions)
         
         self.stacked_widget.addWidget(self.page_tasks)
@@ -1488,6 +1495,7 @@ class EloraHUD(QWidget):
                 self.tasks_list_widget.addItem("No active background tasks.")
                 self.txt_task_log.clear()
                 self.btn_cancel_task.setEnabled(False)
+                self.btn_clear_task.setEnabled(False)
             else:
                 for task in tasks:
                     session = task.get("session")
@@ -1505,7 +1513,10 @@ class EloraHUD(QWidget):
                             elapsed = f"{sec//60}m {sec%60}s ago"
                     
                     status_prefix = f"[{status.capitalize()}] "
-                    item = QListWidgetItem(f"{status_prefix}{session} ({elapsed})\n↳ {prompt[:60]}...")
+                    if status == "running":
+                        item = QListWidgetItem(f"{status_prefix}{session} ({elapsed})\n↳ {prompt[:60]}...")
+                    else:
+                        item = QListWidgetItem(f"{status_prefix}{session} (started {elapsed})\n↳ {prompt[:60]}...")
                     item.setData(Qt.ItemDataRole.UserRole, task)
                     
                     # Style item according to task status
@@ -1527,6 +1538,7 @@ class EloraHUD(QWidget):
         else:
             self.tasks_list_widget.addItem(f"Error: {res.get('message', 'Failed to connect to daemon.')}")
             self.btn_cancel_task.setEnabled(False)
+            self.btn_clear_task.setEnabled(False)
 
     def on_task_selection_changed(self):
         """Called when a task is selected in the list widget. Fetches log immediately."""
@@ -1538,10 +1550,13 @@ class EloraHUD(QWidget):
                 # Enable Cancel button only if the task is currently running
                 is_running = task.get("status") == "running"
                 self.btn_cancel_task.setEnabled(is_running)
+                self.btn_clear_task.setEnabled(not is_running)
             else:
                 self.btn_cancel_task.setEnabled(False)
+                self.btn_clear_task.setEnabled(False)
         else:
             self.btn_cancel_task.setEnabled(False)
+            self.btn_clear_task.setEnabled(False)
         self.update_task_log_view()
 
     def update_task_log_view(self):
@@ -1656,6 +1671,40 @@ class EloraHUD(QWidget):
         else:
             self.console_output.append(f"<span style='color: #EF4444;'>System: Failed to cancel task '{session}'</span>")
 
+    def clear_selected_task(self):
+        """Sends remove command to the daemon for the selected task."""
+        selected_items = self.tasks_list_widget.selectedItems()
+        if not selected_items:
+            return
+            
+        item = selected_items[0]
+        task = item.data(Qt.ItemDataRole.UserRole)
+        if not task:
+            return
+            
+        session = task.get("session")
+        
+        self.btn_clear_task.setEnabled(False)
+        
+        if hasattr(self, "task_clear_thread") and self.task_clear_thread:
+            try:
+                self.task_clear_thread.task_removed.disconnect()
+            except Exception:
+                pass
+                
+        self.task_clear_thread = TaskRemoveThread(session)
+        self.task_clear_thread.task_removed.connect(self.on_task_removed)
+        self._start_background_thread(self.task_clear_thread)
+
+    def on_task_removed(self, res: dict):
+        self.btn_clear_task.setEnabled(True)
+        session = res.get("session", "Unknown")
+        if res.get("status") == "task_removed" and res.get("success"):
+            self.console_output.append(f"<span style='color: #34D399;'>System: Removed task '{session}' from history.</span>")
+            self.refresh_tasks_list()
+        else:
+            self.console_output.append(f"<span style='color: #F87171;'>System: Failed to remove task '{session}'.</span>")
+
     def update_tasks_periodically(self):
         """Refreshes active tasks list and selected log without losing selection state (asynchronously)."""
         try:
@@ -1690,6 +1739,7 @@ class EloraHUD(QWidget):
                     self.tasks_list_widget.addItem("No active background tasks.")
                     self.txt_task_log.clear()
                     self.btn_cancel_task.setEnabled(False)
+                    self.btn_clear_task.setEnabled(False)
                 self.on_task_selection_changed()
                 return
 
@@ -1723,7 +1773,10 @@ class EloraHUD(QWidget):
                             elapsed = f"{sec//60}m {sec%60}s ago"
                     
                     status_prefix = f"[{status.capitalize()}] "
-                    item = QListWidgetItem(f"{status_prefix}{session} ({elapsed})\n↳ {prompt[:60]}...")
+                    if status == "running":
+                        item = QListWidgetItem(f"{status_prefix}{session} ({elapsed})\n↳ {prompt[:60]}...")
+                    else:
+                        item = QListWidgetItem(f"{status_prefix}{session} (started {elapsed})\n↳ {prompt[:60]}...")
                     item.setData(Qt.ItemDataRole.UserRole, task)
                     
                     # Style based on status
@@ -1762,7 +1815,10 @@ class EloraHUD(QWidget):
                             elapsed = f"{sec//60}m {sec%60}s ago"
                             
                     status_prefix = f"[{status.capitalize()}] "
-                    item.setText(f"{status_prefix}{session} ({elapsed})\n↳ {prompt[:60]}...")
+                    if status == "running":
+                        item.setText(f"{status_prefix}{session} ({elapsed})\n↳ {prompt[:60]}...")
+                    else:
+                        item.setText(f"{status_prefix}{session} (started {elapsed})\n↳ {prompt[:60]}...")
                     item.setData(Qt.ItemDataRole.UserRole, task)
                     
                     # Style based on status

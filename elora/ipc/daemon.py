@@ -492,6 +492,15 @@ def handle_client(conn: socket.socket):
                         else:
                             conn.sendall(b'{"status": "error", "message": "Missing session name"}\n')
 
+                    elif cmd == "remove_task":
+                        session_name = payload.get("session")
+                        if session_name:
+                            from elora.skills.actions import remove_task_from_registry
+                            success = remove_task_from_registry(session_name)
+                            conn.sendall((json.dumps({"status": "task_removed", "session": session_name, "success": success}) + "\n").encode("utf-8"))
+                        else:
+                            conn.sendall(b'{"status": "error", "message": "Missing session name"}\n')
+
                     elif cmd == "get_task_log":
                         session_name = payload.get("session")
                         if session_name:

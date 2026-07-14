@@ -290,3 +290,22 @@ def open_browser_url(url: str) -> bool:
         logger.error("Failed to launch system browser: %s", str(e))
         return False
 
+
+def remove_task_from_registry(session_name: str) -> bool:
+    """
+    Removes the specified task from the registry if it exists and is not running.
+    """
+    check_cmd = ["tmux", "has-session", "-t", session_name]
+    res = subprocess.run(check_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if res.returncode == 0:
+        # Task is still running, do not remove
+        return False
+
+    registry = _load_tasks_registry()
+    if session_name in registry:
+        del registry[session_name]
+        _save_tasks_registry(registry)
+        return True
+    return False
+
+
