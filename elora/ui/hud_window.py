@@ -1458,6 +1458,10 @@ class EloraHUD(QWidget):
         
         def cleanup():
             self._active_threads.discard(thread)
+            # Safely clear references on self if they point to the finished thread
+            for attr in ["task_list_thread", "task_log_thread", "task_cancel_thread"]:
+                if getattr(self, attr, None) is thread:
+                    setattr(self, attr, None)
             
         thread.finished.connect(cleanup)
         thread.finished.connect(thread.deleteLater)
@@ -1556,12 +1560,18 @@ class EloraHUD(QWidget):
         
         if hasattr(self, "task_log_thread") and self.task_log_thread:
             # Prevent starting duplicate request thread for the same session
-            if self.task_log_thread.isRunning() and getattr(self.task_log_thread, "session", None) == session:
-                return
             try:
-                self.task_log_thread.log_fetched.disconnect()
-            except Exception:
-                pass
+                if self.task_log_thread.isRunning() and getattr(self.task_log_thread, "session", None) == session:
+                    return
+            except RuntimeError:
+                # C++ object already deleted, clear python wrapper reference
+                self.task_log_thread = None
+
+            if self.task_log_thread:
+                try:
+                    self.task_log_thread.log_fetched.disconnect()
+                except Exception:
+                    pass
                 
         self.task_log_thread = TaskLogFetchThread(session)
         self.task_log_thread.log_fetched.connect(self.on_task_log_fetched)
@@ -1648,8 +1658,12 @@ class EloraHUD(QWidget):
 
     def update_tasks_periodically(self):
         """Refreshes active tasks list and selected log without losing selection state (asynchronously)."""
-        if hasattr(self, "task_list_thread") and self.task_list_thread and self.task_list_thread.isRunning():
-            return
+        try:
+            if hasattr(self, "task_list_thread") and self.task_list_thread and self.task_list_thread.isRunning():
+                return
+        except RuntimeError:
+            # C++ object already deleted, clear python wrapper reference
+            self.task_list_thread = None
             
         self.task_list_thread = TaskListFetchThread()
         self.task_list_thread.tasks_fetched.connect(self.on_periodic_tasks_fetched)
