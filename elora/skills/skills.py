@@ -183,9 +183,24 @@ def preprocess_command(command: str) -> str:
             flag in cmd_stripped 
             for flag in ["--ts", "--typescript", "--js", "--javascript", "--tailwind", "--eslint", "--app", "--src-dir", "--import-alias"]
         )
+        import shutil
+        pref_pkg = "npm"
+        if shutil.which("pnpm"):
+            pref_pkg = "pnpm"
+        elif shutil.which("yarn"):
+            pref_pkg = "yarn"
+        elif shutil.which("bun"):
+            pref_pkg = "bun"
+            
         if not has_config_flags:
-            cmd_stripped += " --typescript --tailwind --eslint --app --no-src-dir --import-alias '@/*' --use-npm"
-            logger.info("Auto-appended non-interactive defaults to create-next-app command.")
+            cmd_stripped += f" --typescript --tailwind --eslint --app --no-src-dir --import-alias '@/*' --use-{pref_pkg} --yes"
+            logger.info("Auto-appended non-interactive defaults with --use-%s to create-next-app command.", pref_pkg)
+        else:
+            if "--yes" not in cmd_stripped:
+                cmd_stripped += " --yes"
+            if not any(f in cmd_stripped for f in ["--use-npm", "--use-pnpm", "--use-yarn", "--use-bun"]):
+                cmd_stripped += f" --use-{pref_pkg}"
+                logger.info("Auto-appended --use-%s to custom create-next-app command.", pref_pkg)
 
     # 3. Rewrite npm init and yarn init to bypass question-and-answer prompts
     if re.match(r'^npm\s+init\b', cmd_stripped) and not re.search(r'\b(-y|--yes)\b', cmd_stripped):

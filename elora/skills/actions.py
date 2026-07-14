@@ -223,7 +223,7 @@ def execute_agent_task(prompt: str) -> str:
     # Run agy with --print (instead of --prompt-interactive) so it exits automatically when done.
     # We pipe outputs through tee to log_file, capture agy's exit code, write it to exit_file,
     # and exit the shell with the same code.
-    inner_cmd = f"{agy_path} --dangerously-skip-permissions --mode accept-edits --print {escaped_prompt}"
+    inner_cmd = f"{agy_path} --dangerously-skip-permissions --mode accept-edits --print-timeout 20m --print {escaped_prompt}"
     bash_cmd = f"{inner_cmd} 2>&1 | tee {shlex.quote(log_file)}; exit_status=${{PIPESTATUS[0]}}; echo \\$exit_status > {shlex.quote(exit_file)}; exit \\$exit_status"
     
     # tmux command: tmux new-session -d -s session_name "cmd"

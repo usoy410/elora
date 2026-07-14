@@ -473,11 +473,29 @@ def run_agent_loop(
             logger.warning("Agent encountered unknown action: %s", action)
             return result
             
-    # Fallback response if loop iteration limit is hit
+    # Fallback response if loop iteration limit is hit.
+    # Instead of throwing a generic error message, query the Gemini brain one last time
+    # with the full research history of the loop to generate a helpful conversational summary
+    # of what was done and what remains. This ensures the user gets a useful answer and
+    # the session history remembers the context so a "continue" command will work.
+    try:
+        logger.warning("Agent loop reached execution step limit (max_steps=%d). Summarising findings.", max_steps)
+        summary_prompt = (
+            "You have reached the execution step limit. Please compile a final conversational reply "
+            "summarising what you have done and found so far, and explain what was left to do. "
+            "Do not start a new tool action; respond with a direct reply to the user."
+        )
+        loop_history.append({"role": "user", "content": summary_prompt})
+        summary_result = query_elora(summary_prompt, history=loop_history)
+        if summary_result.get("action") == "reply":
+            return summary_result
+    except Exception as e:
+        logger.error("Failed to generate limit-hit summary: %s", e)
+
     return {
         "action": "reply",
         "arguments": {
-            "message": "I've conducted extensive background research but hit my execution step limit before compiling the answer. Please try asking a more focused question."
+            "message": "I've conducted extensive background research but hit my execution limit before compiling the answer. Please try asking a more focused question."
         }
     }
 

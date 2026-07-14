@@ -450,7 +450,7 @@ def save_classroom_document(content: str, filename: str, file_format: str = "md"
     Returns a success message with the file path or an error.
     """
     # Create the target directory
-    doc_dir = os.path.expanduser("~/Documents/Elora_Classroom")
+    doc_dir = os.path.expanduser("~/Documents/elora/elora_classroom")
     try:
         os.makedirs(doc_dir, exist_ok=True)
     except Exception as e:

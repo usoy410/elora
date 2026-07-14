@@ -223,9 +223,12 @@ def transcribe_audio(audio_path: str) -> str:
         client = genai.Client(api_key=api_key)
         
         primary_model = config.get("model_name", "gemini-2.5-flash")
-        model_candidates = [primary_model, "gemini-2.0-flash"]
-        if primary_model == "gemini-2.0-flash":
-            model_candidates = ["gemini-2.0-flash"]
+        # List candidate models, prioritizing the primary model configured by the user,
+        # with robust fallbacks to key active models (including gemini-3.5-flash and gemini-2.5-flash)
+        # to ensure speech transcription continues working even if some models are down/restricted.
+        model_candidates = [primary_model, "gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.0-flash"]
+        seen_models = set()
+        model_candidates = [m for m in model_candidates if not (m in seen_models or seen_models.add(m))]
 
         last_exception = None
         for model in model_candidates:
@@ -319,9 +322,10 @@ def query_elora(user_prompt: str, history: List[Dict[str, str]] = None) -> Dict[
     import time
     
     primary_model = config.get("model_name", "gemini-2.5-flash")
-    model_candidates = [primary_model, "gemini-2.0-flash"]
-    if primary_model == "gemini-2.0-flash":
-        model_candidates = ["gemini-2.0-flash"]
+    # Robust list of models to try in sequence for querying Elora.
+    model_candidates = [primary_model, "gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.0-flash"]
+    seen_models = set()
+    model_candidates = [m for m in model_candidates if not (m in seen_models or seen_models.add(m))]
 
     client = genai.Client(api_key=api_key)
     last_exception = None
@@ -399,9 +403,10 @@ def explain_screen_content(screenshot_path: str = "/tmp/elora_screenshot.png", c
         return "Error: Gemini API key is not configured. Please set the GEMINI_API_KEY environment variable or save it in config.json."
         
     primary_model = config.get("model_name", "gemini-2.5-flash")
-    model_candidates = [primary_model, "gemini-2.0-flash"]
-    if primary_model == "gemini-2.0-flash":
-        model_candidates = ["gemini-2.0-flash"]
+    # Robust list of models to try in sequence for explaining screen contents.
+    model_candidates = [primary_model, "gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.0-flash"]
+    seen_models = set()
+    model_candidates = [m for m in model_candidates if not (m in seen_models or seen_models.add(m))]
         
     # 3. Read screenshot image bytes
     try:
