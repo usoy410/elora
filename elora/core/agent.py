@@ -14,6 +14,7 @@ from elora.skills.classroom import fetch_classroom_data, save_classroom_document
 from elora.skills.browser_control import execute_browser_action
 from elora.skills.os_control import move_mouse_smoothly, click_mouse_at, type_keyboard_text
 from elora.skills.system_skills import set_system_volume, set_system_brightness, perform_window_action, launch_application
+from elora.skills.spotify import control_spotify, play_spotify_uri, search_and_play_spotify
 from elora.core.memory import (
     store_memory,
     search_memory,
@@ -158,7 +159,7 @@ def run_agent_loop(
             
         # Report tool start
         if action in ("web_search", "web_scrape", "command_run", "browser_browse", "browser_click",
-                      "browser_type", "browser_get_elements", "desktop_input", "system_control", "email_fetch_summary", "classroom_query", "classroom_export_doc"):
+                      "browser_type", "browser_get_elements", "desktop_input", "system_control", "spotify_control", "email_fetch_summary", "classroom_query", "classroom_export_doc"):
             _report_status({
                 "type": "tool_start",
                 "tool": action,
@@ -468,6 +469,34 @@ def run_agent_loop(
             })
             loop_history.append({"role": "user", "content": f"System Tool Output (system_control: {ctype}): {res}"})
             current_prompt = f"Analyze system control adjustment outcome and determine next action."
+            
+        elif action == "spotify_control":
+            spotify_action = args.get("param", "")
+            spotify_value = args.get("text", "")
+            search_query = args.get("query", "")
+            
+            logger.info("Executing spotify control with action %s", spotify_action)
+            
+            res = ""
+            if spotify_action == "play_uri":
+                res = play_spotify_uri(spotify_value)
+            elif spotify_action == "search_play":
+                res = search_and_play_spotify(search_query)
+            else:
+                res = control_spotify(spotify_action, spotify_value)
+                
+            _report_status({
+                "type": "tool_output",
+                "tool": "spotify_control",
+                "arguments": args,
+                "output": res
+            })
+            
+            loop_history.append({"role": "user", "content": f"System Tool Output (spotify_control: {spotify_action}):\n{res}"})
+            current_prompt = (
+                f"Analyze the Spotify action execution outcome ('{res}') and formulate your next response. "
+                "Ensure your reply is highly conversational, clear, flowing, and directly confirms the action."
+            )
             
         else:
             logger.warning("Agent encountered unknown action: %s", action)

@@ -84,7 +84,7 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
     allowed_actions = ["antigravity", "browser", "news_fetch", "reply",
                         "memory_store", "memory_recall", "memory_focus", "memory_forget",
                         "browser_browse", "browser_click", "browser_type", "browser_get_elements",
-                        "desktop_input", "system_control", "classroom_query", "classroom_export_doc"]
+                        "desktop_input", "system_control", "spotify_control", "classroom_query", "classroom_export_doc"]
     guidelines = [
         "4. Use 'antigravity' for coding, workspace automation, or heavy calculations. Provide a conversational message in 'message' explaining what you are delegating.",
         "5. Use 'browser' to open a webpage on the user's desktop browser (e.g. \"open github.com\") using default xdg-open.",
@@ -125,6 +125,7 @@ def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
     allowed_actions.extend(["classroom_query", "classroom_export_doc"])
     guidelines.append("22. For any Google Classroom, assignment, coursework, deadline, or student submission requests, you MUST first use 'classroom_query' with: 'mode' set to 'list_pending' (for all pending/missing assignments), 'due_soon' (for assignments due within 7 days), or 'analyze_materials' (to download/analyze worksheet attachments, which requires both 'course_id' and 'coursework_id' arguments). Do NOT attempt to open the browser or search the web for these unless the tool fails.")
     guidelines.append("23. Use 'classroom_export_doc' when the user requests to generate, write, draft, or save a study guide, response draft, essay template, or notes to a file. You MUST specify 'content' (the raw text of the document), 'filename' (the name of the file to save, e.g., 'physics_notes'), and 'format' ('txt', 'md', or 'pdf').")
+    guidelines.append("24. For Spotify playback or control requests (e.g. playing music, a playlist, shuffling, adjusting volume, checking status), you MUST use 'spotify_control' with 'param' set to one of: 'play', 'pause', 'toggle', 'next', 'previous', 'shuffle' (requires 'text' as 'on'/'off'/'toggle'), 'volume' (requires 'text' as '0-100' or '+10'/'-10'), 'play_uri' (requires 'text' as the Spotify URI, e.g., 'spotify:playlist:37i9dQZF1DX8Uebhnv3wqS'), or 'search_play' (requires 'query' as search query, e.g. 'lofi chill').")
 
     guidelines_str = "\n".join(guidelines)
     
@@ -151,13 +152,13 @@ ELORA_RESPONSE_SCHEMA = {
             "properties": {
                 "prompt": {"type": "STRING", "description": "For 'antigravity', the task prompt to pass to the CLI agent."},
                 "url": {"type": "STRING", "description": "For 'browser', 'browser_browse', or 'web_scrape', the URL to open or fetch."},
-                "query": {"type": "STRING", "description": "For 'web_search', 'memory_recall', 'memory_focus', 'memory_forget' — the search query or topic."},
+                "query": {"type": "STRING", "description": "For 'web_search', 'memory_recall', 'memory_focus', 'memory_forget', or 'spotify_control' (search_play action) — the search query or topic."},
                 "command": {"type": "STRING", "description": "For 'command_run', the local shell command to execute."},
                 "mode": {"type": "STRING", "description": "For 'news_fetch' ('skim' or 'deep_dive') or 'classroom_query' ('list_pending', 'due_soon', 'analyze_materials')."},
                 "course_id": {"type": "STRING", "description": "For 'classroom_query', the Classroom course ID (required for analyze_materials)."},
                 "coursework_id": {"type": "STRING", "description": "For 'classroom_query', the Classroom coursework ID (required for analyze_materials)."},
                 "index": {"type": "INTEGER", "description": "For 'news_fetch' with mode='deep_dive', the 1-based integer index of the article to open."},
-                "text": {"type": "STRING", "description": "For 'memory_store', 'browser_type', or 'desktop_input' (text/shortcut to type)."},
+                "text": {"type": "STRING", "description": "For 'memory_store', 'browser_type', 'desktop_input' (text/shortcut), or 'spotify_control' (value for volume, shuffle, or play_uri)."},
                 "topic": {"type": "STRING", "description": "For 'memory_store', a short lowercase topic label (e.g. 'linux', 'projects')."},
                 "message": {"type": "STRING", "description": "For 'reply' or 'antigravity', the direct chat/spoken response to the user."},
                 "selector_or_text": {"type": "STRING", "description": "For 'browser_click' or 'browser_type', the CSS selector or the text label of the target element."},
@@ -166,7 +167,7 @@ ELORA_RESPONSE_SCHEMA = {
                 "y": {"type": "INTEGER", "description": "For 'desktop_input' (integer Y coordinate)."},
                 "control_type": {"type": "STRING", "description": "For 'system_control', either 'volume', 'brightness', 'window', or 'launch'."},
                 "level": {"type": "INTEGER", "description": "For 'system_control' (integer 0-100 for volume or brightness)."},
-                "param": {"type": "STRING", "description": "For 'system_control' window actions ('minimize', 'maximize', 'close') or app names to launch."},
+                "param": {"type": "STRING", "description": "For 'system_control' actions, or 'spotify_control' actions ('play', 'pause', 'toggle', 'next', 'previous', 'shuffle', 'volume', 'play_uri', 'search_play', 'status')."},
                 "content": {"type": "STRING", "description": "For 'classroom_export_doc', the text content of the study guide or response draft to write to the file."},
                 "filename": {"type": "STRING", "description": "For 'classroom_export_doc', the target filename to save (e.g. 'history_essay')."},
                 "format": {"type": "STRING", "description": "For 'classroom_export_doc', the file format to export. Must be 'txt', 'md', or 'pdf'."}
