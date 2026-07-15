@@ -147,6 +147,50 @@ def get_spotify_access_token() -> Optional[str]:
         return None
 
 
+def clean_spotify_query(query: str) -> str:
+    """
+    Cleans up the user query by removing common filler words, prefixes,
+    and suffixes to extract the core search term.
+    """
+    q = query.lower().strip()
+    
+    # Strip trailing punctuation (common in speech-to-text transcriptions)
+    q = q.rstrip(".?!,;:")
+    
+    # 1. Strip common action prefixes
+    prefixes = [
+        "play track", "play song", "play playlist", "play album", "play music",
+        "play a music", "play some music", "play", "search for", "search"
+    ]
+    for p in prefixes:
+        if q.startswith(p):
+            q = q[len(p):].strip()
+            break
+            
+    # 2. Strip filler words from start/end iteratively
+    fillers = ["in spotify", "on spotify", "in my", "on my", "my", "the", "a", "some", "in", "on", "by"]
+    changed = True
+    while changed:
+        changed = False
+        for f in fillers:
+            if q.startswith(f + " "):
+                q = q[len(f) + 1:].strip()
+                changed = True
+            elif q.endswith(" " + f):
+                q = q[:-len(f) - 1].strip()
+                changed = True
+                
+    # 3. Strip category suffixes/prefixes
+    categories = ["playlist", "album", "song", "track", "music"]
+    for c in categories:
+        if q.endswith(" " + c):
+            q = q[:-len(c) - 1].strip()
+        elif q.startswith(c + " "):
+            q = q[len(c) + 1:].strip()
+            
+    return q.strip()
+
+
 def search_user_library(query: str, search_type: str) -> Optional[str]:
     """
     Searches the user's owned/saved playlists and Liked Songs (saved tracks).
@@ -158,15 +202,13 @@ def search_user_library(query: str, search_type: str) -> Optional[str]:
         return None
         
     headers = {"Authorization": f"Bearer {token}"}
-    clean_query = query.lower().strip()
     
-    # Strip common search terms to get core name
-    for phrase in ["play track", "play song", "play playlist", "play album", "play"]:
-        if clean_query.startswith(phrase):
-            clean_query = clean_query[len(phrase):].strip()
-            
-    is_playlist_req = "playlist" in search_type or "playlist" in clean_query or "playlist" in query.lower()
-    q_match = clean_query.replace("playlist", "").strip()
+    # Clean the query using the normalizer
+    q_match = clean_spotify_query(query)
+    if not q_match:
+        return None
+        
+    is_playlist_req = "playlist" in search_type or "playlist" in query.lower()
     
     # Helper to scan user's playlists
     def check_playlists() -> Optional[str]:
@@ -233,6 +275,9 @@ def search_spotify_uri_via_api(query: str, search_type: str = "--playlist") -> O
     Searches Spotify via raw JSON API and returns the first result's URI.
     Does not require an active playback session.
     """
+    if not query or not query.strip():
+        return None
+        
     ok, out = run_spotify_cli(["search", search_type, "--raw", query])
     if not ok:
         logger.warning("Spotify raw search failed: %s", out)
@@ -283,24 +328,22 @@ def play_spotify_uri(uri: str) -> str:
 
 def search_and_play_spotify(query: str) -> str:
     """Searches Spotify (prioritizing user's library) and plays the result."""
+    if not query or not query.strip():
+        return "Error: Search query cannot be empty."
+        
     ensure_spotify_running()
     
-    # Determine the search type
-    search_type = "--track"
-    clean_query = query.lower().strip()
+    # Clean query to determine type and terms
+    clean_query = clean_spotify_query(query)
+    if not clean_query:
+        return "Error: Cleaned search query is empty."
     
-    # Strip common filler phrases
-    for phrase in ["play track", "play song", "play playlist", "play album", "play"]:
-        if clean_query.startswith(phrase):
-            clean_query = clean_query[len(phrase):].strip()
-            
+    search_type = "--track"
     # Detect category keyword
     if "playlist" in query.lower():
         search_type = "--playlist"
-        clean_query = clean_query.replace("playlist", "").strip()
     elif "album" in query.lower():
         search_type = "--album"
-        clean_query = clean_query.replace("album", "").strip()
         
     logger.info("Searching and playing: %s (%s)", clean_query, search_type)
     

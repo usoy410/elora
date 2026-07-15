@@ -472,9 +472,22 @@ def run_agent_loop(
             
         elif action == "spotify_control":
             spotify_action = args.get("param", "")
-            spotify_value = args.get("text", "")
-            search_query = args.get("query", "")
             
+            # Bulletproof fallback: scan for any non-empty string/int argument that isn't the action param itself
+            fallback_val = ""
+            for k, v in args.items():
+                if k != "param" and isinstance(v, (str, int)) and str(v).strip():
+                    fallback_val = str(v).strip()
+                    break
+                    
+            spotify_value = args.get("text", "") or args.get("query", "") or args.get("content", "") or fallback_val
+            search_query = args.get("query", "") or args.get("text", "") or args.get("content", "") or fallback_val
+            
+            if isinstance(spotify_value, int):
+                spotify_value = str(spotify_value)
+            if isinstance(search_query, int):
+                search_query = str(search_query)
+                
             logger.info("Executing spotify control with action %s", spotify_action)
             
             res = ""
