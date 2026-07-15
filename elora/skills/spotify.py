@@ -3,6 +3,7 @@ Elora Spotify Control Skill.
 Integrates user's spotify-cli (pipx) and playerctl to control Spotify.
 Bypasses web scraping by using spotify-cli's native search API, and provides playerctl fallbacks.
 Supports self-healing device activation and playerctl DBus fallback for playback session errors.
+Prioritizes user's owned/saved playlists and Liked Songs before falling back to global search.
 """
 
 import logging
@@ -10,6 +11,7 @@ import subprocess
 import time
 import os
 import json
+import requests
 from typing import Optional, Tuple
 
 logger = logging.getLogger("elora.spotify")
@@ -113,6 +115,119 @@ def activate_first_device() -> bool:
     return switch_ok
 
 
+def get_spotify_access_token() -> Optional[str]:
+    """
+    Reads the access token from credentials.json.
+    Triggers an automatic refresh if the token is expired (returns 401 on test call).
+    """
+    cred_path = os.path.expanduser("~/.config/spotify-cli/credentials.json")
+    if not os.path.exists(cred_path):
+        return None
+        
+    try:
+        with open(cred_path) as f:
+            creds = json.load(f)
+        access_token = creds.get("access_token")
+        
+        # Test if the token is valid with a fast GET request
+        headers = {"Authorization": f"Bearer {access_token}"}
+        r = requests.get("https://api.spotify.com/v1/me", headers=headers, timeout=5)
+        if r.status_code == 401:
+            logger.info("Access token expired. Triggering refresh via spotify-cli status...")
+            # Run status command to force CLI to refresh token and write back to credentials.json
+            subprocess.run([SPOTIFY_CLI, "status"], capture_output=True, check=False)
+            # Reload credentials
+            with open(cred_path) as f:
+                creds = json.load(f)
+            access_token = creds.get("access_token")
+            
+        return access_token
+    except Exception as e:
+        logger.error("Failed to read/refresh access token: %s", e)
+        return None
+
+
+def search_user_library(query: str, search_type: str) -> Optional[str]:
+    """
+    Searches the user's owned/saved playlists and Liked Songs (saved tracks).
+    Returns the URI of the matching item if found, otherwise None.
+    """
+    token = get_spotify_access_token()
+    if not token:
+        logger.warning("No Spotify access token available for library search.")
+        return None
+        
+    headers = {"Authorization": f"Bearer {token}"}
+    clean_query = query.lower().strip()
+    
+    # Strip common search terms to get core name
+    for phrase in ["play track", "play song", "play playlist", "play album", "play"]:
+        if clean_query.startswith(phrase):
+            clean_query = clean_query[len(phrase):].strip()
+            
+    is_playlist_req = "playlist" in search_type or "playlist" in clean_query or "playlist" in query.lower()
+    q_match = clean_query.replace("playlist", "").strip()
+    
+    # Helper to scan user's playlists
+    def check_playlists() -> Optional[str]:
+        try:
+            url = "https://api.spotify.com/v1/me/playlists?limit=50"
+            r = requests.get(url, headers=headers, timeout=5)
+            if r.status_code == 200:
+                items = r.json().get("items", [])
+                # 1. Exact match (case insensitive)
+                for item in items:
+                    name = item.get("name", "").lower()
+                    if name == q_match:
+                        logger.info("Found exact user playlist match: %s -> %s", item["name"], item["uri"])
+                        return item["uri"]
+                # 2. Substring match
+                for item in items:
+                    name = item.get("name", "").lower()
+                    if q_match in name or name in q_match:
+                        logger.info("Found fuzzy user playlist match: %s -> %s", item["name"], item["uri"])
+                        return item["uri"]
+        except Exception as e:
+            logger.error("Failed querying user playlists: %s", e)
+        return None
+
+    # Helper to scan user's Liked Songs
+    def check_liked_songs() -> Optional[str]:
+        try:
+            url = "https://api.spotify.com/v1/me/tracks?limit=50"
+            r = requests.get(url, headers=headers, timeout=5)
+            if r.status_code == 200:
+                items = r.json().get("items", [])
+                for item in items:
+                    track = item.get("track", {})
+                    name = track.get("name", "").lower()
+                    artist = track.get("artists", [{}])[0].get("name", "").lower() if track.get("artists") else ""
+                    if q_match in name or q_match in artist or name in q_match:
+                        logger.info("Found user Liked Song match: %s by %s -> %s", track["name"], artist, track["uri"])
+                        return track["uri"]
+        except Exception as e:
+            logger.error("Failed querying user liked tracks: %s", e)
+        return None
+
+    if is_playlist_req:
+        logger.info("Searching user playlists first for: %s", q_match)
+        uri = check_playlists()
+        if uri:
+            return uri
+    else:
+        logger.info("Searching user Liked Songs first for: %s", q_match)
+        uri = check_liked_songs()
+        if uri:
+            return uri
+        # Fallback to check playlists if not found in Liked Songs
+        logger.info("Not found in Liked Songs. Checking user playlists for: %s", q_match)
+        uri = check_playlists()
+        if uri:
+            return uri
+            
+    return None
+
+
 def search_spotify_uri_via_api(query: str, search_type: str = "--playlist") -> Optional[str]:
     """
     Searches Spotify via raw JSON API and returns the first result's URI.
@@ -167,7 +282,7 @@ def play_spotify_uri(uri: str) -> str:
 
 
 def search_and_play_spotify(query: str) -> str:
-    """Searches Spotify using raw API search and plays the result."""
+    """Searches Spotify (prioritizing user's library) and plays the result."""
     ensure_spotify_running()
     
     # Determine the search type
@@ -189,8 +304,14 @@ def search_and_play_spotify(query: str) -> str:
         
     logger.info("Searching and playing: %s (%s)", clean_query, search_type)
     
-    # Resolve search query to a Spotify URI first (this does not require a playback session)
-    uri = search_spotify_uri_via_api(clean_query, search_type)
+    # 1. Search user's owned/saved library first
+    uri = search_user_library(clean_query, search_type)
+    
+    # 2. Fall back to robust global API search if not found in library
+    if not uri:
+        logger.info("Not found in library. Performing global API search for: %s", clean_query)
+        uri = search_spotify_uri_via_api(clean_query, search_type)
+        
     if not uri:
         return f"Could not find any Spotify {search_type.replace('--', '')} matching '{clean_query}'."
         
