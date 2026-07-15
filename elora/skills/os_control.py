@@ -46,8 +46,8 @@ def start_safety_listener():
     def run_listener():
         try:
             with keyboard.Listener(
-                on_press=lambda k: hotkey.press(keyboard.Listener.canonical(k)),
-                on_release=lambda k: hotkey.release(keyboard.Listener.canonical(k))
+                on_press=lambda k: hotkey.press(listener.canonical(k)),
+                on_release=lambda k: hotkey.release(listener.canonical(k))
             ) as listener:
                 listener.join()
         except Exception as e:
