@@ -22,6 +22,78 @@ MODELS_DIR = os.path.expanduser("~/.config/elora/models")
 TEMP_SPEECH_PATH = os.path.expanduser("~/.config/elora/speech.wav")
 _active_playback_process: Optional[subprocess.Popen] = None
 
+_original_volumes = {}
+_is_ducked = False
+
+def duck_media(target_volume: float = 0.15):
+    """
+    Ducks (lowers volume of) all active media players using playerctl.
+    Saves original volumes to restore them later.
+    """
+    global _original_volumes, _is_ducked
+    if _is_ducked:
+        return
+        
+    try:
+        import shutil
+        if not shutil.which("playerctl"):
+            return
+            
+        players_out = subprocess.check_output(["playerctl", "-l"], stderr=subprocess.DEVNULL).decode().strip()
+        players = [p.strip() for p in players_out.split("\n") if p.strip()]
+        if not players:
+            return
+            
+        _original_volumes.clear()
+        for p in players:
+            try:
+                vol_out = subprocess.check_output(["playerctl", "-p", p, "volume"], stderr=subprocess.DEVNULL).decode().strip()
+                if vol_out:
+                    vol = float(vol_out)
+                    _original_volumes[p] = vol
+                    if vol > target_volume:
+                        subprocess.run(["playerctl", "-p", p, "volume", f"{target_volume:.2f}"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+        _is_ducked = True
+        logger.info("Ducked active media players: %s", list(_original_volumes.keys()))
+    except Exception as e:
+        logger.debug("Failed to duck media: %s", e)
+
+
+def unduck_media():
+    """
+    Restores the volume of all ducked media players to their original levels.
+    """
+    global _original_volumes, _is_ducked
+    if not _is_ducked or not _original_volumes:
+        _is_ducked = False
+        return
+        
+    for p, orig_vol in _original_volumes.items():
+        try:
+            subprocess.run(["playerctl", "-p", p, "volume", f"{orig_vol:.2f}"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+            
+    logger.info("Restored media volumes for: %s", list(_original_volumes.keys()))
+    _original_volumes.clear()
+    _is_ducked = False
+
+
+def _play_speech_and_monitor(proc: Optional[subprocess.Popen]) -> None:
+    """Sets the active speech process and monitors it to restore media volume on exit."""
+    global _active_playback_process
+    _active_playback_process = proc
+    if proc is not None:
+        import threading
+        def wait_and_unduck():
+            proc.wait()
+            global _active_playback_process
+            if _active_playback_process is proc:
+                unduck_media()
+        threading.Thread(target=wait_and_unduck, daemon=True).start()
+
 # GitHub release endpoints for the INT8 model and voices binary
 MODEL_INT8_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.int8.onnx"
 VOICES_BIN_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
@@ -335,6 +407,9 @@ def speak_text(text: str, audio_bytes: Optional[bytes] = None, mime_type: Option
     if not voice_config.get("enabled", False):
         return
         
+    # Duck media volume while speaking
+    duck_media()
+        
     # Stop any currently active speech subprocess
     if _active_playback_process is not None:
         try:
@@ -345,16 +420,19 @@ def speak_text(text: str, audio_bytes: Optional[bytes] = None, mime_type: Option
         _active_playback_process = None
 
     if not text.strip() and not audio_bytes:
+        # If we return early and aren't speaking, restore volume
+        unduck_media()
         return
 
     # If audio bytes are pre-synthesized and provided
     if audio_bytes and mime_type:
         try:
             play_path = save_audio_payload(audio_bytes, mime_type, TEMP_SPEECH_PATH)
-            _active_playback_process = play_chime(play_path)
+            _play_speech_and_monitor(play_chime(play_path))
             return
         except Exception as e:
             logger.error("Failed to play pre-synthesized audio: %s", e)
+            unduck_media()
 
     # Use local/cloud Kokoro voice synthesis for dynamic text
     if text.strip():
@@ -378,7 +456,7 @@ def speak_text(text: str, audio_bytes: Optional[bytes] = None, mime_type: Option
                 try:
                     cloud_audio_path = synthesize_cloud_speech(text, space_url, voice_name, speed, token)
                     if cloud_audio_path:
-                        _active_playback_process = play_chime(cloud_audio_path)
+                        _play_speech_and_monitor(play_chime(cloud_audio_path))
                         played_successfully = True
                 except Exception as cloud_err:
                     logger.warning("Cloud TTS failed, falling back to local: %s", cloud_err)
@@ -400,9 +478,10 @@ def speak_text(text: str, audio_bytes: Optional[bytes] = None, mime_type: Option
                     lang="en-us"
                 )
                 sf.write(TEMP_SPEECH_PATH, samples, sample_rate)
-                _active_playback_process = play_chime(TEMP_SPEECH_PATH)
+                _play_speech_and_monitor(play_chime(TEMP_SPEECH_PATH))
             except Exception as local_err:
                 logger.error("Local speech synthesis failed: %s", local_err)
+                unduck_media()
 
 
 def is_speaking() -> bool:

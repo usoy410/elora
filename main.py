@@ -45,6 +45,8 @@ def process_action(payload: Dict[str, any]) -> None:
     action = payload.get("action")
     args = payload.get("arguments", {})
     
+    triggered_speech = False
+    
     if action == "reply":
         message = args.get("message", "")
         if message:
@@ -55,6 +57,7 @@ def process_action(payload: Dict[str, any]) -> None:
         if message and not payload.get("spoke_already", False):
             from elora.skills.voice import speak_text
             speak_text(message)
+            triggered_speech = True
         
         
     elif action == "news_fetch":
@@ -128,6 +131,7 @@ def process_action(payload: Dict[str, any]) -> None:
             # Trigger speech synthesis dynamically if enabled
             from elora.skills.voice import speak_text
             speak_text(message)
+            triggered_speech = True
             
             session = execute_agent_task(prompt)
             if session:
@@ -140,6 +144,14 @@ def process_action(payload: Dict[str, any]) -> None:
             
     else:
         print(f"\nElora: Unknown action requested: {action}\n")
+        
+    # If no speech was triggered by the action execution, ensure we unduck media
+    if not triggered_speech:
+        try:
+            from elora.skills.voice import unduck_media
+            unduck_media()
+        except Exception:
+            pass
 
 
 def execute_single_prompt(prompt: str) -> None:
@@ -283,12 +295,17 @@ def start_voice_assistant_loop() -> None:
     
     while True:
         try:
+            # Duck media volume before recording voice input
+            from elora.skills.voice import duck_media, unduck_media
+            duck_media()
+            
             # Play a short alert chime so the user knows they can speak
             if os.path.exists(chime_path):
                 play_chime(chime_path)
                 
             voice_path = listen_voice()
             if not voice_path:
+                unduck_media()
                 continue
                 
             print("\nElora: Transcribing...")
@@ -296,6 +313,7 @@ def start_voice_assistant_loop() -> None:
             transcribed_text = transcribe_audio(voice_path)
             if not transcribed_text:
                 print("Elora: Could not transcribe audio or no speech detected.")
+                unduck_media()
                 continue
                 
             print(f"\nYou said: \"{transcribed_text}\"")
@@ -304,6 +322,12 @@ def start_voice_assistant_loop() -> None:
             execute_single_prompt(transcribed_text)
             
         except KeyboardInterrupt:
+            # Make sure we unduck on exit
+            try:
+                from elora.skills.voice import unduck_media
+                unduck_media()
+            except Exception:
+                pass
             print("\nGoodbye!")
             break
 

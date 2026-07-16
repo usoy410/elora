@@ -238,6 +238,8 @@ def handle_client(conn: socket.socket):
                         conn.sendall(b'{"status": "ready"}\n')
                         
                     elif cmd == "start_listen":
+                        from elora.skills.voice import duck_media
+                        duck_media()
                         if active_stt and active_stt.is_alive():
                             active_stt.stop()
                         active_stt = ActiveSTTThread(conn)
@@ -250,6 +252,8 @@ def handle_client(conn: socket.socket):
                             active_stt = None
                         else:
                             conn.sendall(b'{"status": "error", "message": "No active capture stream to stop"}\n')
+                        from elora.skills.voice import unduck_media
+                        unduck_media()
                             
                     elif cmd == "query_brain":
                         text = payload.get("text", "")
@@ -331,11 +335,14 @@ def handle_client(conn: socket.socket):
                         action = result.get("action")
                         args = result.get("arguments", {})
                         
+                        triggered_speech = False
+                        
                         if action == "reply":
                             msg = args.get("message", "")
                             add_to_history("assistant", json.dumps(result))
                             if msg and not result.get("spoke_already", False):
                                 speak_text(msg)
+                                triggered_speech = True
 
                         elif action == "news_fetch":
                             mode = args.get("mode", "skim")
@@ -344,7 +351,9 @@ def handle_client(conn: socket.socket):
                             if mode == "skim":
                                 fetch_tech_news()
                                 spoken = get_spoken_news_summary()
-                                speak_text(spoken)
+                                if spoken:
+                                    speak_text(spoken)
+                                    triggered_speech = True
 
                             elif mode == "deep_dive":
                                 idx = args.get("index")
@@ -359,6 +368,7 @@ def handle_client(conn: socket.socket):
                                         title, url = "the article", ""
 
                                     speak_text(f"Opening {title} in your browser now. Tell me if you want a summary or details about it.")
+                                    triggered_speech = True
                                     open_article(idx)
 
                                     if url:
@@ -368,6 +378,7 @@ def handle_client(conn: socket.socket):
                                         )
                                 else:
                                     speak_text("I couldn't find which article you wanted to open.")
+                                    triggered_speech = True
 
                         elif action == "browser":
                             url = args.get("url", "")
@@ -376,6 +387,7 @@ def handle_client(conn: socket.socket):
                                 from urllib.parse import urlparse
                                 domain = urlparse(url).netloc or url
                                 speak_text(f"Opening {domain} in Brave. Tell me if you want a summary or details about it.")
+                                triggered_speech = True
                                 from elora.skills.actions import open_browser_url
                                 open_browser_url(url)
 
@@ -385,12 +397,14 @@ def handle_client(conn: socket.socket):
                                 )
                             else:
                                 speak_text("No URL was provided.")
+                                triggered_speech = True
 
                         elif action == "memory_focus":
                             active_focus = args.get("memory_block", "")
                             msg = args.get("message", f"Focusing on \"{args.get('query', '')}\" now.")
                             add_to_history("assistant", json.dumps(result))
                             speak_text(msg)
+                            triggered_speech = True
 
                         elif action == "antigravity":
                             prompt = args.get("prompt", "")
@@ -403,10 +417,15 @@ def handle_client(conn: socket.socket):
                             
                             add_to_history("assistant", json.dumps(result))
                             speak_text(message)
+                            triggered_speech = True
                             
                             from elora.skills.actions import execute_agent_task
                             session = execute_agent_task(prompt)
                             result["session"] = session
+
+                        if not triggered_speech:
+                            from elora.skills.voice import unduck_media
+                            unduck_media()
 
                         conn.sendall((json.dumps({"status": "response", "result": result}) + "\n").encode("utf-8"))
 
