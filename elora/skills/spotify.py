@@ -403,11 +403,31 @@ def control_spotify(action: str, value: Optional[str] = None) -> str:
     """
     Controls Spotify playback.
     Actions: play, pause, toggle (play-pause), next, previous, shuffle, volume, status.
+    
+    Why: Prioritizes local DBus/playerctl control when the local Spotify client is active.
+    This avoids roundtrip delay and potential active device sync issues with the Web API.
     """
     action = action.lower().strip()
 
     if action in ("play", "pause", "toggle", "next", "previous"):
-        # Map to CLI command
+        playerctl_map = {
+            "play": "play",
+            "pause": "pause",
+            "toggle": "play-pause",
+            "next": "next",
+            "previous": "previous"
+        }
+        playerctl_cmd = playerctl_map[action]
+
+        # Prioritize local playerctl control if Spotify client is running locally
+        if is_spotify_running():
+            try:
+                subprocess.run(["playerctl", "-p", "spotify", playerctl_cmd], check=True)
+                return f"Spotify command '{action}' executed locally via playerctl."
+            except Exception as e:
+                logger.warning("playerctl control failed locally: %s. Falling back to spotify-cli.", e)
+
+        # Fallback to spotify-cli (Web API)
         cli_map = {
             "play": "play",
             "pause": "pause",
@@ -419,23 +439,17 @@ def control_spotify(action: str, value: Optional[str] = None) -> str:
         
         ok, out = run_spotify_cli([cli_cmd])
         if ok:
-            return f"Spotify command '{action}' executed."
+            return f"Spotify command '{action}' executed via spotify-cli."
             
-        # Fall back to playerctl
-        ensure_spotify_running()
-        playerctl_map = {
-            "play": "play",
-            "pause": "pause",
-            "toggle": "play-pause",
-            "next": "next",
-            "previous": "previous"
-        }
-        playerctl_cmd = playerctl_map[action]
-        try:
-            subprocess.run(["playerctl", "-p", "spotify", playerctl_cmd], check=True)
-            return f"Spotify command '{action}' executed via playerctl fallback.\n(Note: {out})"
-        except Exception as e:
-            return f"Failed to execute '{action}': {e}\n(Note: {out})"
+        # If both fail and Spotify wasn't running, start it and try playerctl one last time
+        if not is_spotify_running():
+            ensure_spotify_running()
+            try:
+                subprocess.run(["playerctl", "-p", "spotify", playerctl_cmd], check=True)
+                return f"Spotify command '{action}' executed via playerctl fallback after starting client.\n(Note: {out})"
+            except Exception as e:
+                return f"Failed to execute '{action}': {e}\n(Note: {out})"
+        return f"Failed to execute '{action}': {out}"
 
     elif action == "shuffle":
         if not value:
@@ -446,6 +460,13 @@ def control_spotify(action: str, value: Optional[str] = None) -> str:
             return f"Error: Invalid shuffle state '{value}'. Must be 'on', 'off', or 'toggle'."
 
         if state == "toggle":
+            if is_spotify_running():
+                try:
+                    subprocess.run(["playerctl", "-p", "spotify", "shuffle", "Toggle"], check=True)
+                    return "Spotify shuffle toggled locally via playerctl."
+                except Exception as e:
+                    logger.warning("Failed to toggle shuffle locally: %s. Falling back to start client.", e)
+            
             ensure_spotify_running()
             try:
                 subprocess.run(["playerctl", "-p", "spotify", "shuffle", "Toggle"], check=True)
@@ -453,18 +474,28 @@ def control_spotify(action: str, value: Optional[str] = None) -> str:
             except Exception as e:
                 return f"Failed to toggle shuffle: {e}"
 
+        # Handle 'on' or 'off'
+        playerctl_state = "On" if state == "on" else "Off"
+        if is_spotify_running():
+            try:
+                subprocess.run(["playerctl", "-p", "spotify", "shuffle", playerctl_state], check=True)
+                return f"Spotify shuffle set to {playerctl_state} locally via playerctl."
+            except Exception as e:
+                logger.warning("Failed to set shuffle locally via playerctl: %s. Falling back to spotify-cli.", e)
+
         ok, out = run_spotify_cli(["shuffle", state])
         if ok:
             return f"Spotify shuffle set to {state}."
             
-        # Fall back to playerctl
-        ensure_spotify_running()
-        playerctl_state = "On" if state == "on" else "Off"
-        try:
-            subprocess.run(["playerctl", "-p", "spotify", "shuffle", playerctl_state], check=True)
-            return f"Spotify shuffle set to {playerctl_state} via playerctl fallback.\n(Note: {out})"
-        except Exception as e:
-            return f"Failed to set shuffle: {e}\n(Note: {out})"
+        # Fall back to playerctl after starting client if not running
+        if not is_spotify_running():
+            ensure_spotify_running()
+            try:
+                subprocess.run(["playerctl", "-p", "spotify", "shuffle", playerctl_state], check=True)
+                return f"Spotify shuffle set to {playerctl_state} via playerctl fallback.\n(Note: {out})"
+            except Exception as e:
+                return f"Failed to set shuffle: {e}\n(Note: {out})"
+        return f"Failed to set shuffle: {out}"
 
     elif action == "volume":
         if not value:
@@ -472,6 +503,22 @@ def control_spotify(action: str, value: Optional[str] = None) -> str:
 
         val_str = value.strip()
         
+        # Prioritize local playerctl volume control if running
+        if is_spotify_running():
+            try:
+                if val_str.startswith("+") or val_str.startswith("-"):
+                    diff = float(val_str.replace("%", "")) / 100.0
+                    sign = "+" if diff > 0 else "-"
+                    diff_abs = abs(diff)
+                    subprocess.run(["playerctl", "-p", "spotify", "volume", f"{diff_abs:.2f}{sign}"], check=True)
+                    return f"Spotify volume adjusted by {value} locally via playerctl."
+                else:
+                    level = float(val_str.replace("%", "")) / 100.0
+                    subprocess.run(["playerctl", "-p", "spotify", "volume", f"{level:.2f}"], check=True)
+                    return f"Spotify volume set to {val_str}% locally via playerctl."
+            except Exception as e:
+                logger.warning("Failed to adjust volume locally via playerctl: %s. Falling back to spotify-cli.", e)
+
         # Try relative or absolute change via CLI
         if val_str.startswith("+") or val_str.startswith("-"):
             direction = "up" if val_str.startswith("+") else "down"
@@ -484,23 +531,35 @@ def control_spotify(action: str, value: Optional[str] = None) -> str:
         if ok:
             return f"Spotify volume set to {value}."
 
-        # Fall back to playerctl
-        ensure_spotify_running()
-        try:
-            if val_str.startswith("+") or val_str.startswith("-"):
-                diff = float(val_str.replace("%", "")) / 100.0
-                sign = "+" if diff > 0 else "-"
-                diff_abs = abs(diff)
-                subprocess.run(["playerctl", "-p", "spotify", "volume", f"{diff_abs:.2f}{sign}"], check=True)
-                return f"Spotify volume adjusted by {value} via playerctl fallback.\n(Note: {out})"
-            else:
-                level = float(val_str.replace("%", "")) / 100.0
-                subprocess.run(["playerctl", "-p", "spotify", "volume", f"{level:.2f}"], check=True)
-                return f"Spotify volume set to {val_str}% via playerctl fallback.\n(Note: {out})"
-        except Exception as e:
-            return f"Failed to adjust volume: {e}\n(Note: {out})"
+        # Fall back to playerctl and launch client if needed
+        if not is_spotify_running():
+            ensure_spotify_running()
+            try:
+                if val_str.startswith("+") or val_str.startswith("-"):
+                    diff = float(val_str.replace("%", "")) / 100.0
+                    sign = "+" if diff > 0 else "-"
+                    diff_abs = abs(diff)
+                    subprocess.run(["playerctl", "-p", "spotify", "volume", f"{diff_abs:.2f}{sign}"], check=True)
+                    return f"Spotify volume adjusted by {value} via playerctl fallback.\n(Note: {out})"
+                else:
+                    level = float(val_str.replace("%", "")) / 100.0
+                    subprocess.run(["playerctl", "-p", "spotify", "volume", f"{level:.2f}"], check=True)
+                    return f"Spotify volume set to {val_str}% via playerctl fallback.\n(Note: {out})"
+            except Exception as e:
+                return f"Failed to adjust volume: {e}\n(Note: {out})"
+        return f"Failed to adjust volume: {out}"
 
     elif action == "status":
+        # Prioritize local playerctl status if running
+        if is_spotify_running():
+            try:
+                status = subprocess.check_output(["playerctl", "-p", "spotify", "status"]).decode().strip()
+                artist = subprocess.check_output(["playerctl", "-p", "spotify", "metadata", "artist"]).decode().strip()
+                title = subprocess.check_output(["playerctl", "-p", "spotify", "metadata", "title"]).decode().strip()
+                return f"Spotify Status (playerctl): {status}\nPlaying: {title} by {artist}"
+            except Exception as e:
+                logger.warning("Failed to fetch status locally via playerctl: %s. Falling back to spotify-cli.", e)
+
         ok, out = run_spotify_cli(["status"])
         if ok:
             return out
