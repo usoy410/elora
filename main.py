@@ -234,7 +234,7 @@ def start_voice_assistant_loop() -> None:
     from elora.utils import play_chime
     import os
     
-    chime_path = "/home/usoy/Documents/antigravity/elora/assets/sounds/success-chime.mp3"
+    chime_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "sounds", "success-chime.mp3")
     
     print("===========================================")
     print("  ELORA Voice Assistant Loop (Hands-Free)  ")

@@ -31,7 +31,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     },
     "sound": {
         "enabled": True,
-        "chime_path": "/home/usoy/Documents/antigravity/elora/assets/sounds/success-chime.mp3"
+        "chime_path": os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", "sounds", "success-chime.mp3")
     },
     "voice": {
         "enabled": False,

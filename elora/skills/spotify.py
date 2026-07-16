@@ -13,10 +13,13 @@ import os
 import json
 import requests
 from typing import Optional, Tuple
+import difflib
+import shutil
 
 logger = logging.getLogger("elora.spotify")
 
-SPOTIFY_CLI = "/home/usoy/.local/bin/spotify-cli"
+# Resolve the spotify-cli executable path dynamically
+SPOTIFY_CLI = shutil.which("spotify-cli") or os.path.expanduser("~/.local/bin/spotify-cli")
 
 
 def run_spotify_cli(args: list) -> Tuple[bool, str]:
@@ -217,13 +220,25 @@ def search_user_library(query: str, search_type: str) -> Optional[str]:
             r = requests.get(url, headers=headers, timeout=5)
             if r.status_code == 200:
                 items = r.json().get("items", [])
-                # 1. Exact match (case insensitive)
+                
+                # Tier 1: Exact match (case insensitive)
                 for item in items:
                     name = item.get("name", "").lower()
                     if name == q_match:
                         logger.info("Found exact user playlist match: %s -> %s", item["name"], item["uri"])
                         return item["uri"]
-                # 2. Substring match
+                        
+                # Tier 2: Close match using difflib
+                playlist_names = [item.get("name", "").lower() for item in items if item.get("name")]
+                matches = difflib.get_close_matches(q_match, playlist_names, n=1, cutoff=0.6)
+                if matches:
+                    best_match = matches[0]
+                    for item in items:
+                        if item.get("name", "").lower() == best_match:
+                            logger.info("Found close user playlist match via difflib: %s -> %s", item["name"], item["uri"])
+                            return item["uri"]
+                            
+                # Tier 3: Substring match
                 for item in items:
                     name = item.get("name", "").lower()
                     if q_match in name or name in q_match:
@@ -240,12 +255,34 @@ def search_user_library(query: str, search_type: str) -> Optional[str]:
             r = requests.get(url, headers=headers, timeout=5)
             if r.status_code == 200:
                 items = r.json().get("items", [])
+                
+                # Tier 1: Exact match (case insensitive) on track name or artist name
+                for item in items:
+                    track = item.get("track", {})
+                    name = track.get("name", "").lower()
+                    artist = track.get("artists", [{}])[0].get("name", "").lower() if track.get("artists") else ""
+                    if name == q_match or artist == q_match:
+                        logger.info("Found exact user Liked Song match: %s by %s -> %s", track["name"], artist, track["uri"])
+                        return track["uri"]
+                        
+                # Tier 2: Close match using difflib on track names
+                track_names = [item.get("track", {}).get("name", "").lower() for item in items if item.get("track", {}).get("name")]
+                matches = difflib.get_close_matches(q_match, track_names, n=1, cutoff=0.6)
+                if matches:
+                    best_match = matches[0]
+                    for item in items:
+                        track = item.get("track", {})
+                        if track.get("name", "").lower() == best_match:
+                            logger.info("Found close user Liked Song match via difflib: %s -> %s", track["name"], track["uri"])
+                            return track["uri"]
+                            
+                # Tier 3: Substring match
                 for item in items:
                     track = item.get("track", {})
                     name = track.get("name", "").lower()
                     artist = track.get("artists", [{}])[0].get("name", "").lower() if track.get("artists") else ""
                     if q_match in name or q_match in artist or name in q_match:
-                        logger.info("Found user Liked Song match: %s by %s -> %s", track["name"], artist, track["uri"])
+                        logger.info("Found fuzzy user Liked Song match: %s by %s -> %s", track["name"], artist, track["uri"])
                         return track["uri"]
         except Exception as e:
             logger.error("Failed querying user liked tracks: %s", e)
