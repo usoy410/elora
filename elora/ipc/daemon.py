@@ -334,7 +334,8 @@ def handle_client(conn: socket.socket):
                         if action == "reply":
                             msg = args.get("message", "")
                             add_to_history("assistant", json.dumps(result))
-                            speak_text(msg)
+                            if msg and not result.get("spoke_already", False):
+                                speak_text(msg)
 
                         elif action == "news_fetch":
                             mode = args.get("mode", "skim")

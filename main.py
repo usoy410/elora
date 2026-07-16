@@ -47,12 +47,14 @@ def process_action(payload: Dict[str, any]) -> None:
     
     if action == "reply":
         message = args.get("message", "")
-        print(f"\nElora: {message}\n")
+        if message:
+            print(f"\nElora: {message}\n")
         add_to_history("assistant", json.dumps(payload))
         
-        # Trigger speech synthesis dynamically if enabled
-        from elora.skills.voice import speak_text
-        speak_text(message)
+        # Trigger speech synthesis dynamically if enabled and not already spoken
+        if message and not payload.get("spoke_already", False):
+            from elora.skills.voice import speak_text
+            speak_text(message)
         
         
     elif action == "news_fetch":

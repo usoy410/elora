@@ -84,6 +84,7 @@ def run_agent_loop(
     
     step_count = 0
     max_steps = 5
+    spoke_already = False
     
     def _report_status(payload: Any):
         if status_callback:
@@ -146,16 +147,21 @@ def run_agent_loop(
                       "memory_store", "memory_recall", "memory_focus", "memory_forget"):
             # Handle memory actions inline and return a synthesised reply
             if action == "memory_store":
-                return _handle_memory_store(args)
+                result_obj = _handle_memory_store(args)
             elif action == "memory_recall":
-                return _handle_memory_recall(args)
+                result_obj = _handle_memory_recall(args)
             elif action == "memory_focus":
                 # memory_focus returns raw hits so daemon can set active_focus;
                 # wrap them in the result so daemon can consume them.
-                return _handle_memory_focus(args)
+                result_obj = _handle_memory_focus(args)
             elif action == "memory_forget":
-                return _handle_memory_forget(args)
-            return result
+                result_obj = _handle_memory_forget(args)
+            else:
+                result_obj = result
+
+            if spoke_already and isinstance(result_obj, dict):
+                result_obj["spoke_already"] = True
+            return result_obj
             
         # Report tool start
         if action in ("web_search", "web_scrape", "command_run", "browser_browse", "browser_click",
@@ -490,6 +496,32 @@ def run_agent_loop(
                 
             logger.info("Executing spotify control with action %s", spotify_action)
             
+            # Speak announcement first if present and starting playback
+            announcement = args.get("message", "")
+            spoke_this_turn = False
+            if announcement and spotify_action in ("play", "play_uri", "search_play"):
+                try:
+                    from elora.skills.voice import speak_text, is_speaking
+                    import time
+                    
+                    # Print announcement so CLI users see it
+                    print(f"\nElora: {announcement}\n")
+                    _report_status({
+                        "type": "thought",
+                        "text": f"Speaking: {announcement}"
+                    })
+                    
+                    speak_text(announcement)
+                    
+                    # Block until speaking is finished to prevent overlap with music
+                    while is_speaking():
+                        time.sleep(0.1)
+                        
+                    spoke_this_turn = True
+                except Exception as voice_err:
+                    logger.error("Failed to speak Spotify announcement: %s", voice_err)
+            
+            # Execute the action
             res = ""
             if spotify_action == "play_uri":
                 res = play_spotify_uri(spotify_value)
@@ -506,13 +538,27 @@ def run_agent_loop(
             })
             
             loop_history.append({"role": "user", "content": f"System Tool Output (spotify_control: {spotify_action}):\n{res}"})
-            current_prompt = (
-                f"Analyze the Spotify action execution outcome ('{res}') and formulate your next response. "
-                "Ensure your reply is highly conversational, clear, flowing, and directly confirms the action."
-            )
+            
+            # If playback succeeded, set spoke_already flag so we suppress the duplicate speech at the end of the loop
+            if spoke_this_turn and "error" not in res.lower() and "failed" not in res.lower():
+                spoke_already = True
+                current_prompt = (
+                    f"Analyze the Spotify action execution outcome ('{res}'). "
+                    "Since the playback announcement has already been spoken to the user before the music started, "
+                    "you MUST respond with a reply action containing an empty message (arguments: {'message': ''}) "
+                    "so Elora does not speak again. Simply acknowledge silently."
+                )
+            else:
+                current_prompt = (
+                    f"Analyze the Spotify action execution outcome ('{res}') and formulate your next response. "
+                    "Ensure your reply is highly conversational, clear, flowing, and directly confirms the action or explains the error."
+                )
             
         else:
             logger.warning("Agent encountered unknown action: %s", action)
+            # Inject spoke_already flag even in limits/errors if returning result
+            if spoke_already and isinstance(result, dict):
+                result["spoke_already"] = True
             return result
             
     # Fallback response if loop iteration limit is hit.
