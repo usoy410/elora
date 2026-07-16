@@ -85,25 +85,40 @@ Ensure the following tools are installed on your Linux system:
 *   `notify-send` (libnotify)
 *   `aplay` / `mpv` (sound players)
 
-### Setup & Authentication
+### Installation
 
-1.  Sync dependencies using `uv`:
-    ```bash
-    uv sync
-    ```
-2.  Obtain a free Gemini API Key from Google AI Studio and configure it:
-    *   Set the `GEMINI_API_KEY` environment variable, OR
-    *   Paste it directly inside the HUD Settings panel.
+You can install Elora to standard user paths (`~/.local/share/elora`, `~/.local/bin/elora`), register the desktop application entry, and configure the background systemd daemon service by running the installer:
+
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+### Guided Configuration Wizard
+
+At the end of the installation, or at any time by running:
+```bash
+elora --setup
+# or manually in development:
+uv run python main.py --setup
+```
+an interactive setup wizard will guide you through:
+1. **Google Gemini API Key**: Links your Google AI Studio API key (obtain a free key from [Google AI Studio](https://aistudio.google.com/)).
+2. **Speech & Voice Feedback**: Selects between a local offline speech engine (Kokoro-ONNX) or cloud engine (waking up a custom Hugging Face Space).
+3. **Spotify Music Control**: Detects, installs, and logs you into `spotify-cli` (`spotify-cli auth login` is run directly from the wizard).
+4. **Google Classroom Integration**: Sets up the Google Cloud credentials JSON file path for listing pending coursework.
 
 ---
 
 ## Usage
 
-Elora can be executed in six modes:
+Elora can be executed in seven modes:
 
 ### 1. Interactive REPL Mode
 Start an interactive conversational loop:
 ```bash
+elora
+# or in development:
 uv run python main.py
 ```
 
@@ -135,6 +150,12 @@ uv run python main.py --hud
 Take a screenshot of your active desktop workspace and generate a conversational explanation of what is currently on the screen using Gemini's visual capabilities:
 ```bash
 uv run python main.py --explain-screen
+```
+
+### 7. Interactive Configuration Wizard Mode
+Configure API keys, Voice/Speech provider, Spotify CLI authentication, and Google Classroom credentials:
+```bash
+elora --setup
 ```
 
 ---

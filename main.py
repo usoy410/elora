@@ -376,6 +376,12 @@ def ensure_daemon_running() -> None:
 def main() -> None:
     # Check if arguments are passed directly
     if len(sys.argv) > 1:
+        # Check if the user wants to run the setup/configuration wizard
+        if sys.argv[1] in ("--setup", "--wizard"):
+            from elora.core.wizard import run_setup_wizard
+            run_setup_wizard()
+            return
+
         # Check if the user wants to start the daemon process directly
         if sys.argv[1] == "--daemon":
             from elora.ipc.daemon import run_daemon

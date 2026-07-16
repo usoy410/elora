@@ -144,6 +144,18 @@ echo "    - Start daemon: systemctl --user start elora-daemon"
 echo "    - Check status: systemctl --user status elora-daemon"
 echo "--------------------------------------------------------"
 
+# 8. Interactive Configuration Wizard Option
+if [ -t 0 ]; then
+    echo ""
+    read -rp "Would you like to run the configuration wizard now to set up your APIs (Gemini, Spotify, etc.)? [Y/n]: " run_wizard
+    if [[ -z "$run_wizard" || "$run_wizard" =~ ^[Yy](es)?$ ]]; then
+        (
+            cd "$INSTALL_DIR"
+            uv run python main.py --setup
+        )
+    fi
+fi
+
 # PATH warning if bin is not set
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
     warning "$BIN_DIR is not in your current PATH."
