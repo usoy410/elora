@@ -1052,95 +1052,101 @@ def email_scheduler_loop():
             # to avoid flooding the user with notification spam upon configuration.
             is_first_run = len(seen_uids) == 0
 
-            # Connect to IMAP
-            mail = imaplib.IMAP4_SSL(imap_server, imap_port)
-            mail.login(email_address, password)
-            mail.select("INBOX")
+            # Connect to IMAP and wrap operations in finally to guarantee logout
+            # Explain the "Why" as required by rules:
+            # We use try/finally for the IMAP connection block to ensure the TCP connection and session 
+            # are logged out cleanly even if network actions fail mid-cycle.
+            mail = None
+            try:
+                mail = imaplib.IMAP4_SSL(imap_server, imap_port)
+                mail.login(email_address, password)
+                mail.select("INBOX")
 
-            # Search unread (UNSEEN) emails using UID search to get persistent UIDs
-            status, response_data = mail.uid('search', None, "UNSEEN")
-            if status != "OK":
-                mail.logout()
-                time.sleep(300)
-                continue
+                # Search unread (UNSEEN) emails using UID search to get persistent UIDs
+                status, response_data = mail.uid('search', None, "UNSEEN")
+                if status != "OK":
+                    continue
 
-            msg_uids = [uid.decode("utf-8") for uid in response_data[0].split() if uid]
-            if not msg_uids:
-                mail.logout()
-                time.sleep(300)
-                continue
+                msg_uids = [uid.decode("utf-8") for uid in response_data[0].split() if uid]
+                if not msg_uids:
+                    continue
 
-            new_uids_to_notify = []
-            for uid in msg_uids:
-                if uid not in seen_uids:
-                    seen_uids.append(uid)
-                    new_uids_to_notify.append(uid)
+                new_uids_to_notify = []
+                for uid in msg_uids:
+                    if uid not in seen_uids:
+                        seen_uids.append(uid)
+                        new_uids_to_notify.append(uid)
 
-            if new_uids_to_notify and not is_first_run:
-                # Group fetched email details
-                # Explain the "Why" as required by rules:
-                # We fetch headers of all new emails first, then build a consolidated notification report 
-                # instead of firing multiple notifications/spoken statements sequentially.
-                fetched_emails = []
-                for uid in new_uids_to_notify:
-                    try:
-                        res, data = mail.uid('fetch', uid, '(BODY[HEADER.FIELDS (FROM SUBJECT)])')
-                        if res == "OK" and data[0]:
-                            raw_headers = data[0][1]
-                            msg = email.message_from_bytes(raw_headers)
-                            sender = msg.get('From', '')
-                            subject = msg.get('Subject', '')
+                if new_uids_to_notify and not is_first_run:
+                    # Group fetched email details
+                    # Explain the "Why" as required by rules:
+                    # We fetch headers of all new emails first, then build a consolidated notification report 
+                    # instead of firing multiple notifications/spoken statements sequentially.
+                    fetched_emails = []
+                    for uid in new_uids_to_notify:
+                        try:
+                            res, data = mail.uid('fetch', uid, '(BODY[HEADER.FIELDS (FROM SUBJECT)])')
+                            if res == "OK" and data[0]:
+                                raw_headers = data[0][1]
+                                msg = email.message_from_bytes(raw_headers)
+                                sender = msg.get('From', '')
+                                subject = msg.get('Subject', '')
 
-                            sender_decoded = decode_mime_header(sender)
-                            subject_decoded = decode_mime_header(subject)
+                                sender_decoded = decode_mime_header(sender)
+                                subject_decoded = decode_mime_header(subject)
 
-                            realname, email_addr = email.utils.parseaddr(sender_decoded)
-                            sender_name = realname or email_addr
-                            
-                            fetched_emails.append({
-                                "sender": sender_name,
-                                "subject": subject_decoded
-                            })
-                    except Exception as email_fetch_err:
-                        logger.error("Failed to fetch headers for email UID %s: %s", uid, email_fetch_err)
+                                realname, email_addr = email.utils.parseaddr(sender_decoded)
+                                sender_name = realname or email_addr
+                                
+                                fetched_emails.append({
+                                    "sender": sender_name,
+                                    "subject": subject_decoded
+                                })
+                        except Exception as email_fetch_err:
+                            logger.error("Failed to fetch headers for email UID %s: %s", uid, email_fetch_err)
 
-                if fetched_emails:
-                    # 1. Build Consolidated Desktop Notification
-                    notification_lines = ["<b>📬 New Emails Received:</b>"]
-                    for em in fetched_emails:
-                        subj_snippet = em["subject"][:60] + "..." if len(em["subject"]) > 60 else em["subject"]
-                        notification_lines.append(f"• From: <b>{em['sender']}</b> - <i>{subj_snippet}</i>")
-                    
-                    send_notification("Unread Emails", "\n".join(notification_lines))
+                    if fetched_emails:
+                        # 1. Build Consolidated Desktop Notification
+                        notification_lines = ["<b>📬 New Emails Received:</b>"]
+                        for em in fetched_emails:
+                            subj_snippet = em["subject"][:60] + "..." if len(em["subject"]) > 60 else em["subject"]
+                            notification_lines.append(f"• From: <b>{em['sender']}</b> - <i>{subj_snippet}</i>")
+                        
+                        send_notification("Unread Emails", "\n".join(notification_lines))
 
-                    # 2. Build Consolidated Spoken Report
-                    count = len(fetched_emails)
-                    if count == 1:
-                        speak_text(f"You have a new email from {fetched_emails[0]['sender']} about {fetched_emails[0]['subject']}.")
-                    elif count <= 3:
-                        speech_parts = [f"You have {count} new emails:"]
-                        for i, em in enumerate(fetched_emails):
-                            if i == count - 1:
-                                speech_parts.append(f"and one from {em['sender']} about {em['subject']}.")
-                            else:
-                                speech_parts.append(f"one from {em['sender']} about {em['subject']},")
-                        speak_text(" ".join(speech_parts))
-                    else:
-                        senders = list(dict.fromkeys(em['sender'] for em in fetched_emails)) # Unique senders
-                        if len(senders) == 1:
-                            speak_text(f"You have {count} new emails from {senders[0]}.")
-                        elif len(senders) == 2:
-                            speak_text(f"You have {count} new emails from {senders[0]} and {senders[1]}.")
+                        # 2. Build Consolidated Spoken Report
+                        count = len(fetched_emails)
+                        if count == 1:
+                            speak_text(f"You have a new email from {fetched_emails[0]['sender']} about {fetched_emails[0]['subject']}.")
+                        elif count <= 3:
+                            speech_parts = [f"You have {count} new emails:"]
+                            for i, em in enumerate(fetched_emails):
+                                if i == count - 1:
+                                    speech_parts.append(f"and one from {em['sender']} about {em['subject']}.")
+                                else:
+                                    speech_parts.append(f"one from {em['sender']} about {em['subject']},")
+                            speak_text(" ".join(speech_parts))
                         else:
-                            speak_text(f"You have {count} new emails from {senders[0]}, {senders[1]}, and others.")
+                            senders = list(dict.fromkeys(em['sender'] for em in fetched_emails)) # Unique senders
+                            if len(senders) == 1:
+                                speak_text(f"You have {count} new emails from {senders[0]}.")
+                            elif len(senders) == 2:
+                                speak_text(f"You have {count} new emails from {senders[0]} and {senders[1]}.")
+                            else:
+                                speak_text(f"You have {count} new emails from {senders[0]}, {senders[1]}, and others.")
 
-            # Update cache file
-            cache["seen_uids"] = seen_uids
-            os.makedirs(CACHE_DIR, exist_ok=True)
-            with open(CACHE_PATH, "w") as f:
-                json.dump(cache, f, indent=2)
+                # Update cache file
+                cache["seen_uids"] = seen_uids
+                os.makedirs(CACHE_DIR, exist_ok=True)
+                with open(CACHE_PATH, "w") as f:
+                    json.dump(cache, f, indent=2)
 
-            mail.logout()
+            finally:
+                if mail:
+                    try:
+                        mail.logout()
+                    except Exception:
+                        pass
 
         except Exception as e:
             logger.error("Error in email scheduler cycle: %s", e)
