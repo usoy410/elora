@@ -63,7 +63,6 @@ class EloraHUD(QWidget):
         self.cached_greeting = None
         self.greeting_discarded = False
         self.greeting_played = False
-        self._initial_auto_start_recording = voice_active
         self.is_processing_user_input = False
         self.session_history = []
         self.record_process: Optional[subprocess.Popen] = None
@@ -764,12 +763,14 @@ class EloraHUD(QWidget):
         self.telemetry_timer.timeout.connect(self.update_telemetry_loop)
         self.telemetry_timer.start(1000)
 
-        if self.voice_active_on_start:
-            # Instantly start recording, and query greeting quietly in parallel
-            QTimer.singleShot(100, self.start_voice_recording)
-            QTimer.singleShot(200, lambda: self.trigger_startup_greeting(quiet=True))
-        else:
-            QTimer.singleShot(800, lambda: self.trigger_startup_greeting(quiet=False))
+        # Setup startup greeting deferred timer (7 seconds idle)
+        # Explain the "Why" as required by rules:
+        # We delay the greeting and tasks report by 7 seconds to give the user a window to interact immediately 
+        # without being interrupted by spoken feedback. If the user interacts (presses Alt), we cancel this greeting.
+        self.startup_greeting_timer = QTimer(self)
+        self.startup_greeting_timer.setSingleShot(True)
+        self.startup_greeting_timer.timeout.connect(lambda: self.trigger_startup_greeting(quiet=False))
+        self.startup_greeting_timer.start(7000)
 
         self.ptt_release_timer = QTimer(self)
         self.ptt_release_timer.setSingleShot(True)
@@ -789,6 +790,18 @@ class EloraHUD(QWidget):
         else:
             self.lbl_screenshot.setText("No screenshot captured yet.\nElora will capture one when navigating.")
             self.lbl_browser_status.setText("CDP Connection: Standing by")
+
+    def closeEvent(self, event):
+        """Cleanly stops any background threads or active timers on window close."""
+        if hasattr(self, "startup_greeting_timer") and self.startup_greeting_timer.isActive():
+            self.startup_greeting_timer.stop()
+        if hasattr(self, "startup_thread") and self.startup_thread and self.startup_thread.isRunning():
+            try:
+                self.startup_thread.greeting_finished.disconnect()
+                self.startup_thread.terminate()
+            except Exception:
+                pass
+        event.accept()
 
     def center_on_screen(self):
         pass
@@ -1075,15 +1088,16 @@ class EloraHUD(QWidget):
         if self.is_recording:
             return
 
-        # If not initial launch recording, cancel any active greeting thread
-        if not getattr(self, "_initial_auto_start_recording", False):
-            self.greeting_discarded = True
-            if hasattr(self, "startup_thread") and self.startup_thread and self.startup_thread.isRunning():
-                try:
-                    self.startup_thread.greeting_finished.disconnect()
-                    self.startup_thread.terminate()
-                except Exception:
-                    pass
+        # Cancel the deferred greeting timer and terminate any active greeting threads
+        if hasattr(self, "startup_greeting_timer") and self.startup_greeting_timer.isActive():
+            self.startup_greeting_timer.stop()
+        self.greeting_discarded = True
+        if hasattr(self, "startup_thread") and self.startup_thread and self.startup_thread.isRunning():
+            try:
+                self.startup_thread.greeting_finished.disconnect()
+                self.startup_thread.terminate()
+            except Exception:
+                pass
 
         self.is_recording = True
         self.update_state_ui("listening", "● LISTENING...")
@@ -1104,9 +1118,6 @@ class EloraHUD(QWidget):
         self.stt_thread = DaemonSTTThread()
         self.stt_thread.status_changed.connect(self.handle_stt_status)
         self.stt_thread.start()
-        
-        # Reset the initial auto-start flag so subsequent recordings are treated as manual interactions
-        self._initial_auto_start_recording = False
 
     def handle_stt_status(self, status: str, text: str):
         if status == "partial_stream":
@@ -1414,19 +1425,7 @@ class EloraHUD(QWidget):
     def handle_startup_greeting_finished(self, result: dict):
         if self.greeting_discarded:
             return
-
-        if self.voice_active_on_start:
-            if not self.greeting_played:
-                # Cache the greeting if we are still waiting for speech or actively running a query
-                if self.is_recording or getattr(self, "is_processing_user_input", False):
-                    self.cached_greeting = result
-                    return
-                else:
-                    self.greeting_played = True
-                    self.play_greeting(result)
-                    return
-        else:
-            self.play_greeting(result)
+        self.play_greeting(result)
 
     def play_greeting(self, result: dict):
         """Displays and speaks the startup greeting or background tasks status update."""

@@ -149,7 +149,9 @@ class ActiveSTTThread(threading.Thread):
             # Save captured frames to WAV
             output_path = "/tmp/elora_user_voice.wav"
             duration = time.monotonic() - start_time
-            if pcm_frames and duration >= 0.5:
+            # Explain the "Why" as required by rules:
+            # We only run transcription if speech was actually detected, preventing slow network API calls on silence.
+            if speech_detected and pcm_frames and duration >= 0.5:
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
                 with wave.open(output_path, "wb") as wav_file:
                     wav_file.setnchannels(1)
@@ -991,6 +993,162 @@ def classroom_scheduler_loop():
         time.sleep(1800)
 
 
+def email_scheduler_loop():
+    """
+    Background loop that polls the user's email inbox for new unread emails.
+    Triggers desktop notifications and speaks the details when new emails arrive.
+    """
+    import datetime
+    import imaplib
+    import email
+    import email.utils
+    import json
+    from elora.core.config import load_config
+    from elora.skills.email import decode_mime_header, load_env_credential
+    from elora.utils import send_notification
+
+    logger.info("Email background scheduler thread started.")
+    
+    # Wait for daemon startup to settle
+    time.sleep(15)
+
+    CACHE_DIR = os.path.expanduser("~/.cache/elora")
+    CACHE_PATH = os.path.join(CACHE_DIR, "email_cache.json")
+
+    while True:
+        try:
+            config = load_config()
+            email_cfg = config.get("email", {})
+            if not email_cfg.get("enabled", True):
+                time.sleep(300)
+                continue
+
+            email_address = email_cfg.get("email_address", "")
+            password_env = email_cfg.get("password_env_var", "ELORA_EMAIL_PASSWORD")
+            imap_server = email_cfg.get("imap_server", "imap.gmail.com")
+            imap_port = email_cfg.get("imap_port", 993)
+
+            if not email_address:
+                time.sleep(300)
+                continue
+
+            password = load_env_credential(password_env) or load_env_credential("ELORA_EMAIL_PASSWORD")
+            if not password:
+                logger.warning("Email scheduler: Password not configured. Set %s in ~/.env or environment.", password_env)
+                time.sleep(300)
+                continue
+
+            # Load seen emails cache
+            cache = {"seen_uids": []}
+            if os.path.exists(CACHE_PATH):
+                try:
+                    with open(CACHE_PATH, "r") as f:
+                        cache = json.load(f)
+                except Exception:
+                    pass
+
+            seen_uids = cache.get("seen_uids", [])
+            # Why: On the very first run (when seen_uids cache is empty), we mark all existing unread emails as seen
+            # to avoid flooding the user with notification spam upon configuration.
+            is_first_run = len(seen_uids) == 0
+
+            # Connect to IMAP
+            mail = imaplib.IMAP4_SSL(imap_server, imap_port)
+            mail.login(email_address, password)
+            mail.select("INBOX")
+
+            # Search unread (UNSEEN) emails using UID search to get persistent UIDs
+            status, response_data = mail.uid('search', None, "UNSEEN")
+            if status != "OK":
+                mail.logout()
+                time.sleep(300)
+                continue
+
+            msg_uids = [uid.decode("utf-8") for uid in response_data[0].split() if uid]
+            if not msg_uids:
+                mail.logout()
+                time.sleep(300)
+                continue
+
+            new_uids_to_notify = []
+            for uid in msg_uids:
+                if uid not in seen_uids:
+                    seen_uids.append(uid)
+                    new_uids_to_notify.append(uid)
+
+            if new_uids_to_notify and not is_first_run:
+                # Group fetched email details
+                # Explain the "Why" as required by rules:
+                # We fetch headers of all new emails first, then build a consolidated notification report 
+                # instead of firing multiple notifications/spoken statements sequentially.
+                fetched_emails = []
+                for uid in new_uids_to_notify:
+                    try:
+                        res, data = mail.uid('fetch', uid, '(BODY[HEADER.FIELDS (FROM SUBJECT)])')
+                        if res == "OK" and data[0]:
+                            raw_headers = data[0][1]
+                            msg = email.message_from_bytes(raw_headers)
+                            sender = msg.get('From', '')
+                            subject = msg.get('Subject', '')
+
+                            sender_decoded = decode_mime_header(sender)
+                            subject_decoded = decode_mime_header(subject)
+
+                            realname, email_addr = email.utils.parseaddr(sender_decoded)
+                            sender_name = realname or email_addr
+                            
+                            fetched_emails.append({
+                                "sender": sender_name,
+                                "subject": subject_decoded
+                            })
+                    except Exception as email_fetch_err:
+                        logger.error("Failed to fetch headers for email UID %s: %s", uid, email_fetch_err)
+
+                if fetched_emails:
+                    # 1. Build Consolidated Desktop Notification
+                    notification_lines = ["<b>📬 New Emails Received:</b>"]
+                    for em in fetched_emails:
+                        subj_snippet = em["subject"][:60] + "..." if len(em["subject"]) > 60 else em["subject"]
+                        notification_lines.append(f"• From: <b>{em['sender']}</b> - <i>{subj_snippet}</i>")
+                    
+                    send_notification("Unread Emails", "\n".join(notification_lines))
+
+                    # 2. Build Consolidated Spoken Report
+                    count = len(fetched_emails)
+                    if count == 1:
+                        speak_text(f"You have a new email from {fetched_emails[0]['sender']} about {fetched_emails[0]['subject']}.")
+                    elif count <= 3:
+                        speech_parts = [f"You have {count} new emails:"]
+                        for i, em in enumerate(fetched_emails):
+                            if i == count - 1:
+                                speech_parts.append(f"and one from {em['sender']} about {em['subject']}.")
+                            else:
+                                speech_parts.append(f"one from {em['sender']} about {em['subject']},")
+                        speak_text(" ".join(speech_parts))
+                    else:
+                        senders = list(dict.fromkeys(em['sender'] for em in fetched_emails)) # Unique senders
+                        if len(senders) == 1:
+                            speak_text(f"You have {count} new emails from {senders[0]}.")
+                        elif len(senders) == 2:
+                            speak_text(f"You have {count} new emails from {senders[0]} and {senders[1]}.")
+                        else:
+                            speak_text(f"You have {count} new emails from {senders[0]}, {senders[1]}, and others.")
+
+            # Update cache file
+            cache["seen_uids"] = seen_uids
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            with open(CACHE_PATH, "w") as f:
+                json.dump(cache, f, indent=2)
+
+            mail.logout()
+
+        except Exception as e:
+            logger.error("Error in email scheduler cycle: %s", e)
+
+        # Poll every 5 minutes (300 seconds)
+        time.sleep(300)
+
+
 def run_daemon():
     """Starts the Unix socket daemon server."""
     if os.path.exists(SOCKET_PATH):
@@ -1018,6 +1176,13 @@ def run_daemon():
         threading.Thread(target=classroom_scheduler_loop, name="ClassroomSchedulerThread", daemon=True).start()
     except Exception as e:
         logger.error("Failed to start classroom scheduler thread: %s", e)
+
+    # Start background email scheduler thread
+    try:
+        threading.Thread(target=email_scheduler_loop, name="EmailSchedulerThread", daemon=True).start()
+        logger.info("Email scheduler thread started successfully.")
+    except Exception as e:
+        logger.error("Failed to start email scheduler thread: %s", e)
 
     try:
         while True:
