@@ -57,8 +57,14 @@ class EloraHUD(QWidget):
     """Centralized HUD interface styled with modern dark obsidian cards."""
     speaking_state_signal = Signal(bool)
 
-    def __init__(self):
+    def __init__(self, voice_active: bool = False):
         super().__init__()
+        self.voice_active_on_start = voice_active
+        self.cached_greeting = None
+        self.greeting_discarded = False
+        self.greeting_played = False
+        self._initial_auto_start_recording = voice_active
+        self.is_processing_user_input = False
         self.session_history = []
         self.record_process: Optional[subprocess.Popen] = None
         self.is_recording = False
@@ -758,7 +764,12 @@ class EloraHUD(QWidget):
         self.telemetry_timer.timeout.connect(self.update_telemetry_loop)
         self.telemetry_timer.start(1000)
 
-        QTimer.singleShot(800, self.trigger_startup_greeting)
+        if self.voice_active_on_start:
+            # Instantly start recording, and query greeting quietly in parallel
+            QTimer.singleShot(100, self.start_voice_recording)
+            QTimer.singleShot(200, lambda: self.trigger_startup_greeting(quiet=True))
+        else:
+            QTimer.singleShot(800, lambda: self.trigger_startup_greeting(quiet=False))
 
         self.ptt_release_timer = QTimer(self)
         self.ptt_release_timer.setSingleShot(True)
@@ -1063,13 +1074,39 @@ class EloraHUD(QWidget):
     def start_voice_recording(self):
         if self.is_recording:
             return
+
+        # If not initial launch recording, cancel any active greeting thread
+        if not getattr(self, "_initial_auto_start_recording", False):
+            self.greeting_discarded = True
+            if hasattr(self, "startup_thread") and self.startup_thread and self.startup_thread.isRunning():
+                try:
+                    self.startup_thread.greeting_finished.disconnect()
+                    self.startup_thread.terminate()
+                except Exception:
+                    pass
+
         self.is_recording = True
         self.update_state_ui("listening", "● LISTENING...")
         self.console_output.append("<br><span style='color: #EC4899;'>System:</span> Recording...")
 
+        # Play alert chime to notify the user that they can speak
+        try:
+            import os
+            from elora.utils import play_chime
+            # Resolve absolute path to the success-chime.mp3 asset
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            chime_path = os.path.join(base_dir, "assets", "sounds", "success-chime.mp3")
+            if os.path.exists(chime_path):
+                play_chime(chime_path)
+        except Exception as e:
+            logger.error("Failed to play start listening chime: %s", e)
+
         self.stt_thread = DaemonSTTThread()
         self.stt_thread.status_changed.connect(self.handle_stt_status)
         self.stt_thread.start()
+        
+        # Reset the initial auto-start flag so subsequent recordings are treated as manual interactions
+        self._initial_auto_start_recording = False
 
     def handle_stt_status(self, status: str, text: str):
         if status == "partial_stream":
@@ -1094,10 +1131,18 @@ class EloraHUD(QWidget):
 
     def handle_transcription(self, text: str):
         if not text:
-            self.console_output.append("<span style='color: rgba(255,255,255,0.45);'>System: No speech detected.</span>")
-            self.reset_to_idle()
+            if self.voice_active_on_start and not self.greeting_played and not self.greeting_discarded:
+                self.greeting_played = True
+                if self.cached_greeting:
+                    self.play_greeting(self.cached_greeting)
+                else:
+                    self.reset_to_idle()
+            else:
+                self.console_output.append("<span style='color: rgba(255,255,255,0.45);'>System: No speech detected.</span>")
+                self.reset_to_idle()
             return
 
+        self.greeting_discarded = True
         self.reset_to_idle()
         self.console_output.append(f"<span style='color: #EC4899;'>System:</span> Transcribed: \"{text}\"")
         self.send_query(text)
@@ -1106,6 +1151,9 @@ class EloraHUD(QWidget):
         text = text.strip()
         if not text:
             return
+
+        self.greeting_discarded = True
+        self.is_processing_user_input = True
 
         self.console_output.append(f"<span style='color: #10B981;'>You:</span> {text}")
         self.session_history.append({"role": "user", "content": text})
@@ -1263,6 +1311,7 @@ class EloraHUD(QWidget):
 
     @Slot(dict)
     def handle_brain_response(self, result: dict):
+        self.is_processing_user_input = False
         action = result.get("action")
         args = result.get("arguments", {})
         self.reset_to_idle()
@@ -1346,15 +1395,16 @@ class EloraHUD(QWidget):
 
     def reset_to_idle(self):
         self.update_state_ui("idle", "[ HOLD ALT TO TALK ]")
-    def trigger_startup_greeting(self):
+    def trigger_startup_greeting(self, quiet: bool = False):
         """
         Determines the startup behavior asynchronously:
         - If there is an active running background task, updates the user with its status and latest logs.
         - Otherwise, greets the user with a fresh greeting and clears historical context.
         """
-        self.update_state_ui("thinking", "INITIALIZING...")
-        self.console_output.clear()
-        self.console_output.append("<span style='color: #818CF8;'>Elora:</span> Initializing cognitive modules...")
+        if not quiet:
+            self.update_state_ui("thinking", "INITIALIZING...")
+            self.console_output.clear()
+            self.console_output.append("<span style='color: #818CF8;'>Elora:</span> Initializing cognitive modules...")
         
         self.startup_thread = StartupGreetingThread(self.config)
         self.startup_thread.greeting_finished.connect(self.handle_startup_greeting_finished)
@@ -1362,6 +1412,24 @@ class EloraHUD(QWidget):
         self.startup_thread.start()
 
     def handle_startup_greeting_finished(self, result: dict):
+        if self.greeting_discarded:
+            return
+
+        if self.voice_active_on_start:
+            if not self.greeting_played:
+                # Cache the greeting if we are still waiting for speech or actively running a query
+                if self.is_recording or getattr(self, "is_processing_user_input", False):
+                    self.cached_greeting = result
+                    return
+                else:
+                    self.greeting_played = True
+                    self.play_greeting(result)
+                    return
+        else:
+            self.play_greeting(result)
+
+    def play_greeting(self, result: dict):
+        """Displays and speaks the startup greeting or background tasks status update."""
         gtype = result.get("type")
         if gtype == "active_tasks":
             update_text = result.get("update_text", "")
@@ -1375,7 +1443,6 @@ class EloraHUD(QWidget):
                 try:
                     from elora.ipc.daemon_client import EloraDaemonClient
                     c = EloraDaemonClient()
-                    # Sync history in daemon to match
                     c.send_cmd({"cmd": "reset_history"})
                     c.send_cmd({
                         "cmd": "add_history",
@@ -1858,7 +1925,11 @@ def start_hud():
         print("Elora HUD is already running. Exiting.")
         sys.exit(0)
 
-    app = QApplication(sys.argv)
-    hud = EloraHUD()
+    # Check for --voice or -v flags and filter them out to prevent Qt warnings
+    voice_active = "--voice" in sys.argv or "-v" in sys.argv
+    clean_argv = [arg for arg in sys.argv if arg not in ("--voice", "-v")]
+
+    app = QApplication(clean_argv)
+    hud = EloraHUD(voice_active=voice_active)
     hud.show()
     sys.exit(app.exec())

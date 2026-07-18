@@ -13,11 +13,6 @@ from typing import List, Dict, Any
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("elora.main")
 
-from elora.core.brain import query_elora
-from elora.skills.actions import execute_agent_task, open_browser_url
-from elora.skills.news import get_news_summary, open_article
-from elora.utils import send_notification
-
 from elora.core.config import load_session_history, save_session_history
 
 # Store a short message history to maintain context during interactive sessions
@@ -42,6 +37,9 @@ def process_action(payload: Dict[str, any]) -> None:
     
     Why: Keeps action execution fully isolated from the LLM prompt cycle.
     """
+    # Defer actions/news imports to keep CLI startup instant
+    from elora.skills.actions import execute_agent_task, open_browser_url
+    from elora.skills.news import get_news_summary, open_article
     action = payload.get("action")
     args = payload.get("arguments", {})
     
@@ -396,6 +394,17 @@ def main() -> None:
             
         # Check if the user wants to launch the centralized HUD v2 window
         if sys.argv[1] == "--hud":
+            # Check single instance lock immediately before doing anything else
+            from elora.ui.hud_window import prevent_multiple_instances
+            if not prevent_multiple_instances():
+                try:
+                    from elora.utils import send_notification
+                    send_notification("Elora HUD", "Elora HUD is already running.")
+                except Exception:
+                    pass
+                print("Elora HUD is already running. Exiting.")
+                sys.exit(0)
+
             ensure_daemon_running()
             from elora.hud import start_hud
             start_hud()

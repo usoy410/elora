@@ -137,6 +137,7 @@ systemctl --user restart elora-daemon.service
 success "Elora has been installed successfully!"
 echo "--------------------------------------------------------"
 echo "🖥️  Launch: Search for 'Elora' in your application menu or run 'elora --hud'"
+echo "🎙️  Instant Voice: Run 'elora --hud --voice' to start the HUD in listening mode instantly"
 echo "💬  CLI Mode: run 'elora' in your terminal"
 echo "⚙️  Background daemon is managed via systemd user services:"
 echo "    - Stop daemon: systemctl --user stop elora-daemon"

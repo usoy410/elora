@@ -345,7 +345,25 @@ def get_pending_assignments_raw() -> Optional[List[Dict[str, Any]]]:
                 due_time_raw = work.get("dueTime")
                 due_dt = parse_classroom_date(due_date_raw, due_time_raw)
                 due_str = due_dt.isoformat() if due_dt else None
-                
+
+                # Extract creationTime and workType to allow the scheduler to filter out old/ended assignments
+                # and construct a unified, detailed report specifying the type of assignment.
+                creation_time_raw = work.get("creationTime")
+                creation_str = None
+                if creation_time_raw:
+                    try:
+                        # Convert UTC Z to standard offset to support fromisoformat parsing
+                        if creation_time_raw.endswith("Z"):
+                            creation_time_raw = creation_time_raw[:-1] + "+00:00"
+                        # Make naive local datetime to avoid comparison errors with other naive datetimes
+                        dt_aware = datetime.datetime.fromisoformat(creation_time_raw)
+                        dt_local = dt_aware.astimezone()
+                        creation_str = dt_local.replace(tzinfo=None).isoformat()
+                    except Exception as parse_err:
+                        logger.warning("Failed to parse creationTime %s: %s", creation_time_raw, parse_err)
+
+                work_type = work.get("workType", "ASSIGNMENT")
+
                 pending_list.append({
                     "course_name": cname,
                     "course_id": cid,
@@ -353,7 +371,9 @@ def get_pending_assignments_raw() -> Optional[List[Dict[str, Any]]]:
                     "title": title,
                     "description": desc,
                     "due_date": due_str,
-                    "state": sub_state
+                    "state": sub_state,
+                    "work_type": work_type,
+                    "creation_time": creation_str
                 })
         return pending_list
     except Exception as e:

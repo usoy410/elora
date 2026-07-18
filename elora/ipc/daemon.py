@@ -594,6 +594,144 @@ def handle_client(conn: socket.socket):
                         add_to_history(role, content)
                         conn.sendall(b'{"status": "added"}\n')
 
+                    elif cmd == "get_greeting":
+                        # Why: We generate the greeting on the daemon to avoid loading heavy 
+                        # ML/DL libraries (like PyTorch and SentenceTransformers) inside the short-lived GUI process.
+                        try:
+                            # 1. Fetch active tasks using internal tmux state & registry
+                            from elora.skills.actions import _load_tasks_registry
+                            registry = _load_tasks_registry()
+                            
+                            active_sessions = set()
+                            try:
+                                output = subprocess.check_output(["tmux", "list-sessions"], stderr=subprocess.DEVNULL).decode()
+                                for line in output.strip().split("\n"):
+                                    if line:
+                                        parts = line.split(":", 1)
+                                        if parts:
+                                            sname = parts[0].strip()
+                                            if sname.startswith("elora-dev"):
+                                                active_sessions.add(sname)
+                            except Exception:
+                                pass
+
+                            running_tasks = []
+                            for sname, info in registry.items():
+                                if sname in active_sessions and info.get("status") == "running":
+                                    running_tasks.append({
+                                        "session": sname,
+                                        "prompt": info.get("prompt", "Unknown background agent task"),
+                                        "started_at": info.get("started_at", 0.0),
+                                        "status": "running"
+                                    })
+                            
+                            active_running = running_tasks
+
+                            if active_running:
+                                # Retrieve status details from the first active running task
+                                task = active_running[0]
+                                session = task.get("session")
+                                prompt = task.get("prompt", "")
+                                started_at = task.get("started_at", 0.0)
+                                
+                                latest_line = ""
+                                try:
+                                    capture_cmd = ["tmux", "capture-pane", "-pt", session]
+                                    res_log = subprocess.run(capture_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                    if res_log.returncode == 0:
+                                        raw_log = res_log.stdout.decode("utf-8", errors="replace")
+                                        from elora.skills.skills import strip_ansi_codes
+                                        cleaned_log = strip_ansi_codes(raw_log).strip()
+                                        if cleaned_log:
+                                            lines = [l.strip() for l in cleaned_log.split("\n") if l.strip()]
+                                            if lines:
+                                                latest_line = lines[-1]
+                                                if len(lines) > 1 and (latest_line.startswith("[") or len(latest_line) < 15):
+                                                    latest_line = f"{lines[-2]} | {latest_line}"
+                                except Exception as e:
+                                    logger.error("Failed to fetch log for greeting update: %s", e)
+
+                                elapsed = ""
+                                if started_at > 0:
+                                    sec = int(time.time() - started_at)
+                                    if sec < 60:
+                                        elapsed = f"{sec} seconds"
+                                    elif sec < 3600:
+                                        elapsed = f"{sec//60} minutes and {sec%60} seconds"
+                                    else:
+                                        elapsed = f"{sec//3600} hours and {(sec%3600)//60} minutes"
+                                else:
+                                    elapsed = "some time"
+
+                                voice_prompt = prompt[:80] + "..." if len(prompt) > 80 else prompt
+                                if len(active_running) > 1:
+                                    update_text = f"I am currently running {len(active_running)} background tasks. The primary task is: '{voice_prompt}', started {elapsed} ago."
+                                else:
+                                    update_text = f"I am currently running the task: '{voice_prompt}', started {elapsed} ago."
+                                    
+                                if latest_line:
+                                    speech_latest = latest_line[:120] + "..." if len(latest_line) > 120 else latest_line
+                                    update_text += f" The latest progress is: {speech_latest}"
+                                else:
+                                    update_text += " No progress logs are available yet."
+
+                                result = {
+                                    "type": "active_tasks",
+                                    "update_text": update_text,
+                                }
+                                conn.sendall((json.dumps({"status": "greeting_result", "result": result}) + "\n").encode("utf-8"))
+                            else:
+                                # 2. No active running tasks, query user memory for name
+                                user_name = "boss"
+                                try:
+                                    from elora.core.memory import is_memory_available, search_memory
+                                    avail, _ = is_memory_available()
+                                    if avail:
+                                        results = search_memory("my name is", top_k=1, threshold=0.5)
+                                        if not results:
+                                            results = search_memory("call me", top_k=1, threshold=0.5)
+                                        if results:
+                                            text = results[0]["text"]
+                                            text_lower = text.lower()
+                                            for pattern in ("name is", "call me"):
+                                                if pattern in text_lower:
+                                                    extracted = text[text_lower.index(pattern) + len(pattern):].strip()
+                                                    extracted = extracted.rstrip(".").rstrip("!").strip()
+                                                    if extracted:
+                                                        user_name = extracted
+                                                        break
+                                except Exception as e:
+                                    logger.error("Failed to recall user name from memory: %s", e)
+
+                                from datetime import datetime
+                                import random
+                                hour = datetime.now().hour
+                                if hour < 12:
+                                    time_of_day = "morning"
+                                elif hour < 17:
+                                    time_of_day = "afternoon"
+                                else:
+                                    time_of_day = "evening"
+
+                                greetings = [
+                                    f"Good {time_of_day} {user_name}, Elora standing by.",
+                                    f"Hello {user_name}. Systems are green and ready.",
+                                    f"Welcome back {user_name}. What is your command?",
+                                    f"System initialized. How can I assist you this {time_of_day}, {user_name}?",
+                                    f"Greetings {user_name}. Standing by for instructions.",
+                                    f"Elora online, {user_name}. What shall we work on?"
+                                ]
+                                local_greeting = random.choice(greetings)
+
+                                result = {
+                                    "type": "fresh_greeting",
+                                    "greeting": local_greeting,
+                                }
+                                conn.sendall((json.dumps({"status": "greeting_result", "result": result}) + "\n").encode("utf-8"))
+                        except Exception as e:
+                            logger.error("Failed to generate greeting: %s", e)
+                            conn.sendall(b'{"status": "error", "message": "Failed to generate greeting"}\n')
+
 
                         
                 except Exception as e:
@@ -660,11 +798,17 @@ def classroom_scheduler_loop():
             updated_cache_assignments = {}
             now = datetime.datetime.now()
             
+            new_assignments = []
+            missing_assignments = []
+            due_soon_24h_to_notify = []
+
             for assignment in assignments:
                 wid = assignment["id"]
                 title = assignment["title"]
                 course_name = assignment["course_name"]
                 due_date_str = assignment.get("due_date")
+                creation_time_str = assignment.get("creation_time")
+                work_type = assignment.get("work_type", "ASSIGNMENT")
                 
                 # Check cache history
                 cached_item = cached_assignments.get(wid, {})
@@ -672,27 +816,66 @@ def classroom_scheduler_loop():
                 notified_deadline_24h = cached_item.get("notified_deadline_24h", False)
                 calendar_synced = cached_item.get("calendar_synced", False)
                 
-                # 1. Detect New Assignment
-                if last_checked and wid not in cached_assignments:
-                    msg = f"New assignment in {course_name}: {title}"
-                    logger.info("Notifying new assignment: %s", msg)
-                    send_notification("New Assignment", msg)
-                    speak_text(f"Boss, you have a new assignment in {course_name}: {title}")
-                    notified_created = True
-                elif not last_checked:
-                    notified_created = True
-                    
-                # 2. Check Upcoming Deadline (within 24 hours)
+                due_dt = None
                 if due_date_str:
                     try:
                         due_dt = datetime.datetime.fromisoformat(due_date_str)
+                    except Exception:
+                        pass
+                
+                # An assignment is missing (overdue) if the due date is in the past
+                if due_dt and due_dt < now:
+                    missing_assignments.append({
+                        "id": wid,
+                        "title": title,
+                        "course_name": course_name,
+                        "due_date": due_dt
+                    })
+                
+                # 1. Detect New Assignment
+                # Explain the "Why" as required by rules:
+                # We filter new assignments to ensure we only notify on assignments created recently (within 7 days)
+                # and whose due date is in the future, avoiding reporting old, already ended tasks.
+                if last_checked and wid not in cached_assignments:
+                    is_recent = True
+                    if creation_time_str:
+                        try:
+                            creation_dt = datetime.datetime.fromisoformat(creation_time_str)
+                            if creation_dt < now - datetime.timedelta(days=7):
+                                is_recent = False
+                        except Exception:
+                            pass
+                    
+                    not_ended = True
+                    if due_dt and due_dt < now:
+                        not_ended = False
+                        
+                    if is_recent and not_ended:
+                        new_assignments.append({
+                            "id": wid,
+                            "title": title,
+                            "course_name": course_name,
+                            "work_type": work_type,
+                            "due_date": due_dt
+                        })
+                    notified_created = True
+                elif not last_checked:
+                    notified_created = True
+                else:
+                    # Mark previously unchecked assignments as processed/notified to prevent re-checks
+                    notified_created = True
+                    
+                # 2. Check Upcoming Deadline (within 24 hours)
+                if due_dt:
+                    try:
                         time_left = due_dt - now
                         if datetime.timedelta(hours=0) < time_left <= datetime.timedelta(hours=24):
                             if not notified_deadline_24h:
-                                msg = f"Due in {int(time_left.total_seconds() // 3600)} hours: {title}"
-                                logger.info("Notifying urgent deadline: %s", msg)
-                                send_notification("Assignment Due Soon", msg)
-                                speak_text(f"Notice, boss: the assignment, {title}, is due in less than 24 hours.")
+                                due_soon_24h_to_notify.append({
+                                    "title": title,
+                                    "course_name": course_name,
+                                    "hours_left": int(time_left.total_seconds() // 3600)
+                                })
                                 notified_deadline_24h = True
                         else:
                             if time_left > datetime.timedelta(hours=24):
@@ -712,10 +895,85 @@ def classroom_scheduler_loop():
                     "course_name": course_name,
                     "due_date": due_date_str,
                     "state": assignment["state"],
+                    "work_type": work_type,
+                    "creation_time": creation_time_str,
                     "notified_created": notified_created,
                     "notified_deadline_24h": notified_deadline_24h,
                     "calendar_synced": calendar_synced
                 }
+
+            # Deliver unified report for new assignments if any are found
+            if new_assignments:
+                # Helper functions for formatting assignment details
+                def get_work_type_friendly(wt: Optional[str]) -> str:
+                    if not wt:
+                        return "Assignment"
+                    wt_upper = wt.upper()
+                    if "SHORT_ANSWER" in wt_upper or "QUESTION" in wt_upper:
+                        return "Question"
+                    if "ASSIGNMENT" in wt_upper:
+                        return "Assignment"
+                    return wt_upper.replace("_", " ").title()
+
+                def format_due_date(dt: Optional[datetime.datetime]) -> str:
+                    if not dt:
+                        return "No due date"
+                    return dt.strftime("%b %d, %I:%M %p")
+
+                # Build formatted notification elements
+                new_lines = []
+                for a in new_assignments:
+                    wt_friendly = get_work_type_friendly(a["work_type"])
+                    due_friendly = format_due_date(a["due_date"])
+                    new_lines.append(f"• [{a['course_name']}] {wt_friendly}: <i>{a['title']}</i> ({due_friendly})")
+
+                missing_lines = []
+                for a in missing_assignments:
+                    due_friendly = format_due_date(a["due_date"])
+                    missing_lines.append(f"• [{a['course_name']}] <i>{a['title']}</i> ({due_friendly})")
+
+                msg_parts = ["<b>🔔 New:</b>"]
+                msg_parts.extend(new_lines)
+
+                if missing_lines:
+                    msg_parts.append("")
+                    msg_parts.append("<b>⚠️ Overdue/Missing:</b>")
+                    msg_parts.extend(missing_lines)
+
+                notification_body = "\n".join(msg_parts)
+                send_notification("Google Classroom Update", notification_body)
+
+                # Speak a clean verbal summary
+                new_courses = list(set(a['course_name'] for a in new_assignments))
+                if len(new_courses) == 1:
+                    courses_phrase = f"in {new_courses[0]}"
+                else:
+                    courses_phrase = f"across {len(new_courses)} courses"
+
+                speech_parts = []
+                if len(new_assignments) == 1:
+                    speech_parts.append(f"Boss, you have a new assignment {courses_phrase}.")
+                else:
+                    speech_parts.append(f"Boss, you have {len(new_assignments)} new assignments {courses_phrase}.")
+
+                if missing_lines:
+                    if len(missing_lines) == 1:
+                        speech_parts.append("You also have one missing assignment.")
+                    else:
+                        speech_parts.append(f"You also have {len(missing_lines)} missing assignments.")
+
+                speak_text(" ".join(speech_parts))
+
+            # Deliver consolidated due soon notifications
+            if due_soon_24h_to_notify:
+                msg_parts = []
+                speech_parts = ["Notice, boss:"]
+                for a in due_soon_24h_to_notify:
+                    msg_parts.append(f"• [{a['course_name']}] <i>{a['title']}</i> (due in {a['hours_left']} hours)")
+                    speech_parts.append(f"the assignment, {a['title']}, is due in {a['hours_left']} hours.")
+                
+                send_notification("Assignments Due Soon", "\n".join(msg_parts))
+                speak_text(" ".join(speech_parts))
                 
             # Save updated states to cache
             cache["last_checked"] = now.isoformat()

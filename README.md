@@ -146,6 +146,13 @@ Launch a gorgeous, transparent, maximized graphical overlay featuring a modular 
 uv run python main.py --hud
 ```
 
+#### **Instant Voice Launch (Hands-Free)**
+Pass the `--voice` (or `-v`) flag to launch the HUD directly in **listening mode**, bypassing the startup greeting:
+```bash
+uv run python main.py --hud --voice
+```
+This is ideal for binding to a system-wide hotkey (e.g., `Super+Space` or `Alt+Space` mapped to `elora --hud --voice`). When pressed, the HUD opens instantly and immediately captures your spoken command. The daemon's silence-detection automatically stops the recording and runs your request when you finish speaking.
+
 ### 6. Screen Explanation Mode
 Take a screenshot of your active desktop workspace and generate a conversational explanation of what is currently on the screen using Gemini's visual capabilities:
 ```bash
