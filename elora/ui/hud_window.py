@@ -778,6 +778,11 @@ class EloraHUD(QWidget):
 
         QApplication.instance().installEventFilter(self)
 
+        # Why: If launched in direct voice/listening mode (--voice / -v), immediately start
+        # voice recording using hands-free silence detection and bypass the startup greeting.
+        if self.voice_active_on_start:
+            QTimer.singleShot(0, lambda: self.start_voice_recording(silence_detection=True))
+
     def update_browser_screenshot(self):
         from PySide6.QtGui import QPixmap
         import os
@@ -1060,11 +1065,17 @@ class EloraHUD(QWidget):
     def eventFilter(self, watched, event):
         if event.type() == QEvent.Type.KeyPress:
             if event.key() in (Qt.Key.Key_Alt, Qt.Key.Key_AltGr):
+                # Why: Cancel and discard the startup greeting/report strictly when user presses Alt/AltGr (input mode).
+                if hasattr(self, "startup_greeting_timer") and self.startup_greeting_timer.isActive():
+                    self.startup_greeting_timer.stop()
+                self.greeting_discarded = True
+
                 if not event.isAutoRepeat():
                     if self.ptt_release_timer.isActive():
                         self.ptt_release_timer.stop()
                     else:
-                        self.start_voice_recording()
+                        # Why: Alt/AltGr key acts as Push-To-Talk, so we disable silence detection timeouts during recording.
+                        self.start_voice_recording(silence_detection=False)
                 return True
             elif event.key() == Qt.Key.Key_Escape:
                 if self.active_sidebar_tab != -1:
@@ -1084,7 +1095,7 @@ class EloraHUD(QWidget):
                 
         return super().eventFilter(watched, event)
 
-    def start_voice_recording(self):
+    def start_voice_recording(self, silence_detection: bool = False):
         if self.is_recording:
             return
 
@@ -1115,7 +1126,7 @@ class EloraHUD(QWidget):
         except Exception as e:
             logger.error("Failed to play start listening chime: %s", e)
 
-        self.stt_thread = DaemonSTTThread()
+        self.stt_thread = DaemonSTTThread(silence_detection=silence_detection)
         self.stt_thread.status_changed.connect(self.handle_stt_status)
         self.stt_thread.start()
 
@@ -1412,6 +1423,15 @@ class EloraHUD(QWidget):
         - If there is an active running background task, updates the user with its status and latest logs.
         - Otherwise, greets the user with a fresh greeting and clears historical context.
         """
+        # Why: Bypasses the startup greeting/report if the user is actively pressing the Alt button,
+        # if voice recording is currently active, or if user interaction has discarded the greeting.
+        alt_pressed = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.AltModifier)
+        if alt_pressed or self.is_recording or self.greeting_discarded:
+            if hasattr(self, "startup_greeting_timer") and self.startup_greeting_timer.isActive():
+                self.startup_greeting_timer.stop()
+            self.greeting_discarded = True
+            return
+
         if not quiet:
             self.update_state_ui("thinking", "INITIALIZING...")
             self.console_output.clear()

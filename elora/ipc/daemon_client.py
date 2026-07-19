@@ -79,14 +79,14 @@ class EloraDaemonClient:
         finally:
             self.close()
 
-    def start_voice_listening(self, callback: Callable[[Dict[str, Any]], None]):
+    def start_voice_listening(self, callback: Callable[[Dict[str, Any]], None], silence_detection: bool = True):
         """Initiates recording stream on the daemon and routes real-time transcriptions to callback."""
         if not self.connect():
             callback({"status": "error", "message": "Elora background daemon is not running."})
             return
         
         try:
-            payload = json.dumps({"cmd": "start_listen"}) + "\n"
+            payload = json.dumps({"cmd": "start_listen", "silence_detection": silence_detection}) + "\n"
             self.sock.sendall(payload.encode("utf-8"))
             self.listening = True
             

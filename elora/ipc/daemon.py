@@ -85,9 +85,10 @@ class ActiveSTTThread(threading.Thread):
     Saves output to WAV file and notifies client.
     """
 
-    def __init__(self, conn: socket.socket):
+    def __init__(self, conn: socket.socket, silence_detection: bool = True):
         super().__init__(daemon=True)
         self.conn = conn
+        self.silence_detection = silence_detection
         self.running = True
         self.process = None
 
@@ -136,14 +137,21 @@ class ActiveSTTThread(threading.Thread):
                     last_sound_time = current_time
 
                 # Auto-finalise when silence threshold is exceeded
-                if speech_detected:
-                    if current_time - last_sound_time > SILENCE_TIMEOUT_SEC:
-                        logger.debug("Silence timeout reached, finalising audio file.")
-                        break
+                if self.silence_detection:
+                    if speech_detected:
+                        if current_time - last_sound_time > SILENCE_TIMEOUT_SEC:
+                            logger.debug("Silence timeout reached, finalising audio file.")
+                            break
+                    else:
+                        # Timed out waiting for start of speech
+                        if current_time - start_time > 5.0:
+                            logger.debug("No speech detected.")
+                            break
                 else:
-                    # Timed out waiting for start of speech
-                    if current_time - start_time > 5.0:
-                        logger.debug("No speech detected.")
+                    # Why: In Push-to-Talk (PTT) mode, silence timeouts are disabled so the user
+                    # isn't cut off while holding Alt. We use a 120s safety limit to prevent runaways.
+                    if current_time - start_time > 120.0:
+                        logger.debug("Absolute PTT timeout reached, finalising audio file.")
                         break
 
             # Save captured frames to WAV
@@ -244,7 +252,9 @@ def handle_client(conn: socket.socket):
                         duck_media()
                         if active_stt and active_stt.is_alive():
                             active_stt.stop()
-                        active_stt = ActiveSTTThread(conn)
+                        # Extract silence_detection (default to True if not specified)
+                        silence_detection = payload.get("silence_detection", True)
+                        active_stt = ActiveSTTThread(conn, silence_detection=silence_detection)
                         active_stt.start()
                         
                     elif cmd == "stop_listen":

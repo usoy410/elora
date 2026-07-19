@@ -14,8 +14,9 @@ class DaemonSTTThread(QThread):
     """Background thread delegating live audio recording and Vosk STT to the daemon."""
     status_changed = Signal(str, str)  # status, text payload
 
-    def __init__(self):
+    def __init__(self, silence_detection: bool = True):
         super().__init__()
+        self.silence_detection = silence_detection
         self.client = None
 
     def run(self):
@@ -35,7 +36,7 @@ class DaemonSTTThread(QThread):
             elif status == "error":
                 self.status_changed.emit("error", res.get("message", ""))
 
-        self.client.start_voice_listening(callback)
+        self.client.start_voice_listening(callback, silence_detection=self.silence_detection)
 
     def stop(self):
         if self.client:
