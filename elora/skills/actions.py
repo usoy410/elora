@@ -66,15 +66,15 @@ def cancel_tmux_session(session_name: str) -> bool:
 
 
 
-def _find_new_html_files(start_time: float) -> list[str]:
+def _find_new_html_files(start_time: float, search_dir: str = ".") -> list[str]:
     """
-    Finds recursively any .html files in the current working directory modified after start_time.
+    Finds recursively any .html files in the target directory modified after start_time.
     Avoids virtual environments and git folders to keep scanning extremely fast.
     """
     import os
     html_files = []
     ignored_dirs = {".venv", ".git", "__pycache__", ".agents"}
-    for root, dirs, files in os.walk("."):
+    for root, dirs, files in os.walk(search_dir):
         dirs[:] = [d for d in dirs if d not in ignored_dirs and not d.startswith(".")]
         for file in files:
             if file.endswith(".html"):
@@ -88,7 +88,7 @@ def _find_new_html_files(start_time: float) -> list[str]:
     return html_files
 
 
-def _monitor_session(session_name: str, task_prompt: str, start_time: float) -> None:
+def _monitor_session(session_name: str, task_prompt: str, start_time: float, project_dir: str = ".") -> None:
     """
     Background worker that polls tmux to check if the session is still active.
     When the session exits, it updates the task status in the registry and alerts
@@ -140,7 +140,7 @@ def _monitor_session(session_name: str, task_prompt: str, start_time: float) -> 
             _save_tasks_registry(registry)
     
     # Check if any new HTML files were created/modified during the task execution
-    new_htmls = _find_new_html_files(start_time)
+    new_htmls = _find_new_html_files(start_time, project_dir)
     preview_opened = False
     opened_file_name = ""
     
@@ -205,12 +205,66 @@ def execute_agent_task(prompt: str) -> str:
     session_name = _get_unique_tmux_session("elora-dev")
     start_time = time.time()
     
+    # Determine base directory based on prompt context (classroom vs coding/projects)
+    classroom_keywords = ["classroom", "homework", "assignment", "class", "lecture", "student", "teacher", "coursework", "school", "study", "exam", "quiz"]
+    is_classroom = any(kw in prompt.lower() for kw in classroom_keywords)
+    
+    if is_classroom:
+        base_dir = os.path.expanduser("~/Documents/elora/elora_classroom")
+    else:
+        base_dir = os.path.expanduser("~/Documents/elora/elora_projects")
+        
+    # Extract or generate a clean project directory name
+    import re
+    project_name = None
+    
+    # Check for "project called/named <name>"
+    match = re.search(r'\bproject\s+(?:called|named)\s+([a-zA-Z0-9_-]+)', prompt, re.IGNORECASE)
+    if match:
+        project_name = match.group(1)
+    else:
+        # Check for "project: <name>" or "project <name>" (excluding filler words)
+        match = re.search(r'\bproject[\s:]+([a-zA-Z0-9_-]+)', prompt, re.IGNORECASE)
+        if match and match.group(1).lower() not in ("called", "named", "a", "an", "the", "for", "in", "to", "of", "with"):
+            project_name = match.group(1)
+        else:
+            # Check for "called/named <name>" (excluding filler words)
+            match = re.search(r'\b(?:called|named)[\s:]+([a-zA-Z0-9_-]+)', prompt, re.IGNORECASE)
+            if match and match.group(1).lower() not in ("a", "an", "the", "for", "in", "to", "of", "with", "project"):
+                project_name = match.group(1)
+            
+    if not project_name:
+        # Generate slug from first 4 alphanumeric words of prompt, excluding common filler words
+        words = [w for w in re.findall(r'[a-zA-Z0-9]+', prompt) if w.lower() not in (
+            "create", "make", "build", "write", "do", "fix", "a", "an", "the", "in", "for", "to", "project", "task", "session"
+        )]
+        if not words:
+            words = re.findall(r'[a-zA-Z0-9]+', prompt)[:4]
+        if words:
+            project_name = "_".join(words[:4]).lower()
+        else:
+            project_name = f"task_{int(time.time())}"
+            
+    project_dir = os.path.join(base_dir, project_name)
+    try:
+        os.makedirs(project_dir, exist_ok=True)
+        logger.info("Created project directory: %s", project_dir)
+    except Exception as e:
+        logger.error("Failed to create project directory %s: %s", project_dir, e)
+        # Fallback to base_dir
+        project_dir = base_dir
+        os.makedirs(project_dir, exist_ok=True)
+        
     # Locate the absolute path of agy
     import shutil
     agy_path = shutil.which("agy") or "/usr/bin/agy"
     
     # Construct the tmux shell invocation command safely using shlex.quote
-    escaped_prompt = shlex.quote(prompt)
+    # We append a workspace hint to the prompt so the background agent knows to initialize
+    # files directly inside the current workspace directory (using '.') instead of nesting them.
+    hint = f"\n\n[Workspace Hint: You are executing directly inside the designated project directory at '{project_dir}'. Please create, edit, or initialize files directly in this directory. For example, if initializing a React/Next.js/Vite app, run the generator tool with target '.' or the current directory rather than creating a nested subfolder.]"
+    prompt_with_hint = prompt + hint
+    escaped_prompt = shlex.quote(prompt_with_hint)
     
     # Define log files inside the ~/.config/elora/logs directory
     # Why: Since tmux sessions close automatically when the running command ends (with --print),
@@ -223,12 +277,13 @@ def execute_agent_task(prompt: str) -> str:
     # Run agy with --print (instead of --prompt-interactive) so it exits automatically when done.
     # We pipe outputs through tee to log_file, capture agy's exit code, write it to exit_file,
     # and exit the shell with the same code.
+    # We cd to project_dir first before running agy so the agent works in the target folder.
     inner_cmd = f"{agy_path} --dangerously-skip-permissions --mode accept-edits --print-timeout 20m --print {escaped_prompt}"
-    bash_cmd = f"{inner_cmd} 2>&1 | tee {shlex.quote(log_file)}; exit_status=${{PIPESTATUS[0]}}; echo \\$exit_status > {shlex.quote(exit_file)}; exit \\$exit_status"
+    bash_cmd = f"cd {shlex.quote(project_dir)} && {inner_cmd} 2>&1 | tee {shlex.quote(log_file)}; exit_status=${{PIPESTATUS[0]}}; echo \\$exit_status > {shlex.quote(exit_file)}; exit \\$exit_status"
     
-    # tmux command: tmux new-session -d -s session_name "cmd"
+    # tmux command: tmux new-session -d -s session_name -c starting_dir "cmd"
     # We wrap in bash -c to ensure the redirection, pipe, and exit code capture logic is executed.
-    tmux_cmd = ["tmux", "new-session", "-d", "-s", session_name, f"bash -c {shlex.quote(bash_cmd)}"]
+    tmux_cmd = ["tmux", "new-session", "-d", "-s", session_name, "-c", project_dir, f"bash -c {shlex.quote(bash_cmd)}"]
     
     try:
         logger.info("Spawning background agent task in tmux: %s", session_name)
@@ -238,7 +293,7 @@ def execute_agent_task(prompt: str) -> str:
         register_task(session_name, prompt)
         
         # Spawn daemon watcher thread to play completion alerts when the tmux task exits
-        t = threading.Thread(target=_monitor_session, args=(session_name, prompt, start_time), daemon=True)
+        t = threading.Thread(target=_monitor_session, args=(session_name, prompt, start_time, project_dir), daemon=True)
         t.start()
         
         # Notify the user
