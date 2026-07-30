@@ -3,6 +3,18 @@ Elora CLI & Core OS Orchestrator.
 Entry point that handles interactive loop inputs, piped streams, and direct arguments.
 """
 
+import socket
+
+# Force IPv4 only to bypass hanging on unreachable IPv6 addresses in some Linux environments.
+# Why: httpx can get stuck attempting connections to IPv6 addresses that have no route,
+# whereas curl falls back to IPv4 immediately.
+_orig_getaddrinfo = socket.getaddrinfo
+def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    if family == socket.AF_UNSPEC:
+        family = socket.AF_INET
+    return _orig_getaddrinfo(host, port, family, type, proto, flags)
+socket.getaddrinfo = _ipv4_only_getaddrinfo
+
 import sys
 import os
 import json
@@ -390,6 +402,12 @@ def main() -> None:
         if sys.argv[1] == "--voice":
             ensure_daemon_running()
             start_voice_assistant_loop()
+            return
+        
+        # Check if the user wants to launch the Telegram remote control bot
+        if sys.argv[1] == "--telegram":
+            from elora.skills.telegram_bot import start_telegram_bot
+            start_telegram_bot()
             return
             
         # Check if the user wants to launch the centralized HUD v2 window

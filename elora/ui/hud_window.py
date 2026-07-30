@@ -356,8 +356,9 @@ class EloraHUD(QWidget):
         self.btn_sub_brain = QPushButton("Brain", self)
         self.btn_sub_system = QPushButton("System", self)
         self.btn_sub_email = QPushButton("Email", self)
+        self.btn_sub_telegram = QPushButton("Telegram", self)
 
-        self.sub_buttons = [self.btn_sub_speech, self.btn_sub_brain, self.btn_sub_system, self.btn_sub_email]
+        self.sub_buttons = [self.btn_sub_speech, self.btn_sub_brain, self.btn_sub_system, self.btn_sub_email, self.btn_sub_telegram]
         for btn in self.sub_buttons:
             btn.setCheckable(True)
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -368,12 +369,21 @@ class EloraHUD(QWidget):
         self.btn_sub_brain.clicked.connect(lambda: self.switch_settings_subpage(1))
         self.btn_sub_system.clicked.connect(lambda: self.switch_settings_subpage(2))
         self.btn_sub_email.clicked.connect(lambda: self.switch_settings_subpage(3))
+        self.btn_sub_telegram.clicked.connect(lambda: self.switch_settings_subpage(4))
 
         self.settings_layout.addWidget(self.settings_nav)
 
         # Stacked widget for sub-pages
         self.settings_stack = QStackedWidget(self)
         self.settings_layout.addWidget(self.settings_stack)
+
+        # Global Save Settings action (visible on all sub-tabs)
+        self.btn_save_settings = QPushButton("Save Settings", self)
+        self.btn_save_settings.setIcon(QIcon.fromTheme("document-save"))
+        self.btn_save_settings.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_save_settings.setStyleSheet("background-color: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.25); color: #A7F3D0; font-weight: bold; margin-top: 10px;")
+        self.btn_save_settings.clicked.connect(self.save_settings)
+        self.settings_layout.addWidget(self.btn_save_settings)
 
         # ------------------- Sub-page 0: Speech -------------------
         self.subpage_speech = QWidget(self)
@@ -552,14 +562,6 @@ class EloraHUD(QWidget):
         self.btn_reset_conv.clicked.connect(self.reset_conversation)
         layout_system.addWidget(self.btn_reset_conv)
 
-        # Save settings action
-        self.btn_save_settings = QPushButton("Save Settings", self)
-        self.btn_save_settings.setIcon(QIcon.fromTheme("document-save"))
-        self.btn_save_settings.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_save_settings.setStyleSheet("background-color: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.25); color: #A7F3D0;")
-        self.btn_save_settings.clicked.connect(self.save_settings)
-        layout_system.addWidget(self.btn_save_settings)
-
         layout_system.addStretch()
         self.settings_stack.addWidget(self.subpage_system)
 
@@ -609,6 +611,50 @@ class EloraHUD(QWidget):
 
         layout_email.addStretch()
         self.settings_stack.addWidget(self.subpage_email)
+
+        # ------------------- Sub-page 4: Telegram -------------------
+        self.subpage_telegram = QWidget()
+        layout_telegram = QVBoxLayout(self.subpage_telegram)
+        layout_telegram.setContentsMargins(0, 0, 0, 0)
+        layout_telegram.setSpacing(10)
+
+        telegram_cfg = self.config.get("telegram", {})
+
+        self.chk_telegram = QCheckBox("Enable Telegram Bot")
+        self.chk_telegram.setChecked(telegram_cfg.get("enabled", False))
+        self.chk_telegram.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        layout_telegram.addWidget(self.chk_telegram)
+
+        lbl_tg_token_env = QLabel("TOKEN ENV VARIABLE NAME")
+        lbl_tg_token_env.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
+        layout_telegram.addWidget(lbl_tg_token_env)
+
+        self.txt_tg_token_env = QLineEdit()
+        self.txt_tg_token_env.setPlaceholderText("TELEGRAM_BOT_TOKEN")
+        self.txt_tg_token_env.setText(telegram_cfg.get("token_env_var", "TELEGRAM_BOT_TOKEN"))
+        layout_telegram.addWidget(self.txt_tg_token_env)
+
+        lbl_tg_allowed_ids = QLabel("ALLOWED USER IDS (comma-separated)")
+        lbl_tg_allowed_ids.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
+        layout_telegram.addWidget(lbl_tg_allowed_ids)
+
+        self.txt_tg_allowed_ids = QLineEdit()
+        self.txt_tg_allowed_ids.setPlaceholderText("e.g. 123456789, 987654321")
+        allowed_ids_str = ", ".join(str(uid) for uid in telegram_cfg.get("allowed_user_ids", []))
+        self.txt_tg_allowed_ids.setText(allowed_ids_str)
+        layout_telegram.addWidget(self.txt_tg_allowed_ids)
+
+        lbl_tg_max_file = QLabel("MAX FILE TRANSFER SIZE (MB)")
+        lbl_tg_max_file.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
+        layout_telegram.addWidget(lbl_tg_max_file)
+
+        self.txt_tg_max_file = QLineEdit()
+        self.txt_tg_max_file.setPlaceholderText("50")
+        self.txt_tg_max_file.setText(str(telegram_cfg.get("max_file_size_mb", 50)))
+        layout_telegram.addWidget(self.txt_tg_max_file)
+
+        layout_telegram.addStretch()
+        self.settings_stack.addWidget(self.subpage_telegram)
 
         # Initialize active sub-tab state
         self.switch_settings_subpage(0)
@@ -975,6 +1021,25 @@ class EloraHUD(QWidget):
         except ValueError:
             imap_port = 993
 
+        # Telegram configurations
+        tg_enabled = self.chk_telegram.isChecked()
+        tg_token_env = self.txt_tg_token_env.text().strip() or "TELEGRAM_BOT_TOKEN"
+        tg_allowed_ids_str = self.txt_tg_allowed_ids.text().strip()
+        tg_max_file_str = self.txt_tg_max_file.text().strip()
+
+        tg_allowed_ids = []
+        if tg_allowed_ids_str:
+            for item in tg_allowed_ids_str.split(","):
+                try:
+                    tg_allowed_ids.append(int(item.strip()))
+                except ValueError:
+                    pass
+
+        try:
+            tg_max_file = int(tg_max_file_str) if tg_max_file_str else 50
+        except ValueError:
+            tg_max_file = 50
+
         updates = {
             "voice": {
                 "voice_name": selected_voice,
@@ -995,6 +1060,12 @@ class EloraHUD(QWidget):
                 "imap_server": imap_server,
                 "imap_port": imap_port,
                 "password_env_var": password_env
+            },
+            "telegram": {
+                "enabled": tg_enabled,
+                "token_env_var": tg_token_env,
+                "allowed_user_ids": tg_allowed_ids,
+                "max_file_size_mb": tg_max_file
             }
         }
         save_config(updates)

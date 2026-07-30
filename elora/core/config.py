@@ -49,6 +49,12 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         "password_env_var": "ELORA_EMAIL_PASSWORD",
         "max_emails_to_check": 10
     },
+    "telegram": {
+        "enabled": False,
+        "token_env_var": "TELEGRAM_BOT_TOKEN",
+        "allowed_user_ids": [],
+        "max_file_size_mb": 50
+    },
     "personality": "default",
     "custom_personality": ""
 }
