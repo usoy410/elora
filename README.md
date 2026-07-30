@@ -67,6 +67,8 @@ sequenceDiagram
 *   **Background Agent Delegation & Monitoring**: Automatically delegates complex coding or research tasks to the Antigravity CLI (`agy`) inside a detached background `tmux` session, releasing your terminal instantly. View real-time log outputs, track running times, and cancel active sessions directly from the HUD dashboard.
 *   **Fuzzy Spotify & Music Control**: Integrates `spotify-cli` and `playerctl` locally to command playback sessions. Supports library-first searches (Liked Songs and playlists) and self-healing active device detection.
 *   **Google Classroom & Calendar Integration**: Fetches assignments, downloads worksheets, alerts upcoming deadlines (<24h), and syncs coursework deliverables directly to Google Calendar.
+*   **Local IMAP Email Reporting**: Securely connects to your IMAP mail server (e.g., Gmail) to fetch and summarize unread or recent emails. Extracts metadata (From, Subject, Date) and parses plain-text or HTML bodies dynamically (stripping boilerplate HTML and truncating snippets to prevent LLM context inflation) for direct vocal summary or HUD display.
+*   **Telegram Remote Control Bot**: Starts a secure background listener (`elora --telegram`) that allows you to command your system remotely via Telegram. Supports processing natural language text commands, downloading and transcribing voice notes to execute tasks, sending photos as visual context, requesting desktop screenshots, zipping and downloading project directories (with default folder exclusions), and tracking running background agent tasks.
 *   **Semantic Memory Engine**: Persistent database storing personal preferences, server settings, and configurations. Supports recall, topic filtering, targeted focus blocks, and forgetting.
 *   **RSS News Aggregator (Skim & Deep Dive)**: Fetches and parses popular tech feeds locally. Prints summaries directly in Markdown and launches articles on-demand in the default system browser via `xdg-open`.
 *   **System Notifications**: Uses `notify-send` and auditory chimes (`aplay`/`mpv`) to send non-blocking task alerts.
@@ -112,7 +114,7 @@ an interactive setup wizard will guide you through:
 
 ## Usage
 
-Elora can be executed in seven modes:
+Elora can be executed in eight modes:
 
 ### 1. Interactive REPL Mode
 Start an interactive conversational loop:
@@ -165,6 +167,14 @@ Configure API keys, Voice/Speech provider, Spotify CLI authentication, and Googl
 elora --setup
 ```
 
+### 8. Telegram Bot Remote Control Mode
+Start the Telegram remote control bot listener to command your system securely from anywhere:
+```bash
+elora --telegram
+# or in development:
+uv run python main.py --telegram
+```
+
 ---
 
 ## Configuration
@@ -208,6 +218,12 @@ Elora settings are stored dynamically in `~/.config/elora/config.json`. You can 
     "password_env_var": "ELORA_EMAIL_PASSWORD",
     "max_emails_to_check": 10
   },
+  "telegram": {
+    "enabled": false,
+    "token_env_var": "TELEGRAM_BOT_TOKEN",
+    "allowed_user_ids": [],
+    "max_file_size_mb": 50
+  },
   "personality": "default",
   "custom_personality": ""
 }
@@ -230,6 +246,10 @@ Elora settings are stored dynamically in `~/.config/elora/config.json`. You can 
 *   **email.email_address**: The email address used to authenticate.
 *   **email.password_env_var**: The environment variable name where your IMAP account/app password is stored (default is `ELORA_EMAIL_PASSWORD`).
 *   **email.max_emails_to_check**: The number of recent/unread emails to scan and summarize.
+*   **telegram.enabled**: Toggles the Telegram remote control bot interface.
+*   **telegram.token_env_var**: The environment variable holding your Telegram bot token (default is `TELEGRAM_BOT_TOKEN`).
+*   **telegram.allowed_user_ids**: An array of integer Telegram user IDs authorized to issue commands to the bot.
+*   **telegram.max_file_size_mb**: Maximum file size limit in MB for file transfers/downloads via the bot.
 *   **personality**: Target assistant response persona (`default`, `funny`, `direct`, `polite`, `respectful`, `other`).
 *   **custom_personality**: Dynamic style instructions used when personality is set to `other`.
 
@@ -243,6 +263,23 @@ To configure this skill:
 1. Create a Desktop Application OAuth credential inside the [Google Cloud Console](https://console.cloud.google.com/) with Classroom & Drive read-only scopes.
 2. Download the JSON credentials file and save it exactly as `~/.config/elora/classroom_credentials.json`.
 3. The first time Elora runs a classroom command (e.g. `"What homework is due soon?"`), a browser window will automatically launch for authentication. Once authorized, Elora will save the refresh token to `~/.config/elora/classroom_token.json` for continuous background access.
+
+### Telegram Remote Control Setup
+Elora can be securely controlled remotely using a Telegram bot. Follow these setup steps to enable it:
+
+1. Create a bot by talking to [@BotFather](https://t.me/BotFather) on Telegram and secure your API token.
+2. Store this token in your environment (typically in `~/.env` as `TELEGRAM_BOT_TOKEN=your_token`).
+3. Find your personal Telegram user ID (e.g., by messaging [@userinfobot](https://t.me/userinfobot) on Telegram).
+4. Configure your user ID in `~/.config/elora/config.json`:
+   ```json
+   "telegram": {
+     "enabled": true,
+     "token_env_var": "TELEGRAM_BOT_TOKEN",
+     "allowed_user_ids": [123456789],
+     "max_file_size_mb": 50
+   }
+   ```
+5. Run the bot using `elora --telegram` (or `uv run python main.py --telegram`). The bot will only respond to messages sent by users listed under `allowed_user_ids`.
 
 ---
 
@@ -277,6 +314,7 @@ To configure this skill:
         *   [spotify.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/spotify.py) — Fuzzy music search and play integration via spotify-cli and playerctl.
         *   [stt.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/stt.py) — Backup local RMS silence threshold recorder.
         *   [system_skills.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/system_skills.py) — OS audio controls, brightness, and application launch helpers.
+        *   [telegram_bot.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/telegram_bot.py) — Long-polling Telegram bot interface for remote system commands, file/screenshot transfers, and task notifications.
         *   [voice.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/voice.py) — TTS voice synthesis routing and Hugging Face warmup engine.
     *   [hud.py](file:///home/usoy/Documents/antigravity/elora/elora/hud.py) — Facade router maintaining start_hud imports backward-compatibility.
     *   [utils.py](file:///home/usoy/Documents/antigravity/elora/elora/utils.py) — Desktop notify-send alerts and sound playing utilities.
