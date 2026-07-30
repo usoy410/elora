@@ -224,6 +224,15 @@ Elora settings are stored dynamically in `~/.config/elora/config.json`. You can 
     "allowed_user_ids": [],
     "max_file_size_mb": 50
   },
+  "background_agent": {
+    "active_provider": "agy",
+    "providers": {
+      "agy": "agy --dangerously-skip-permissions --mode accept-edits --print-timeout 20m --print {prompt}",
+      "claude-cli": "claude-cli --prompt {prompt}",
+      "codex": "codex {prompt}",
+      "custom": ""
+    }
+  },
   "personality": "default",
   "custom_personality": ""
 }
@@ -250,6 +259,8 @@ Elora settings are stored dynamically in `~/.config/elora/config.json`. You can 
 *   **telegram.token_env_var**: The environment variable holding your Telegram bot token (default is `TELEGRAM_BOT_TOKEN`).
 *   **telegram.allowed_user_ids**: An array of integer Telegram user IDs authorized to issue commands to the bot.
 *   **telegram.max_file_size_mb**: Maximum file size limit in MB for file transfers/downloads via the bot.
+*   **background_agent.active_provider**: The currently active background execution provider (choices: `agy`, `claude-cli`, `codex`, `custom`).
+*   **background_agent.providers**: Command templates dict for each provider, where `{prompt}` represents the target task string.
 *   **personality**: Target assistant response persona (`default`, `funny`, `direct`, `polite`, `respectful`, `other`).
 *   **custom_personality**: Dynamic style instructions used when personality is set to `other`.
 

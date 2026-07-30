@@ -543,13 +543,66 @@ class EloraHUD(QWidget):
         self.subpage_system = QWidget(self)
         layout_system = QVBoxLayout(self.subpage_system)
         layout_system.setContentsMargins(0, 0, 0, 0)
-        layout_system.setSpacing(15)
+        layout_system.setSpacing(12)
 
         self.chk_safe_gate = QCheckBox("Safe Gate Mode (Approve dangerous commands)", self)
         self.chk_safe_gate.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.chk_safe_gate.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 10px; color: #D1D5DB;")
         self.chk_safe_gate.setChecked(self.config.get("safe_gate_mode", True))
         layout_system.addWidget(self.chk_safe_gate)
+
+        # Background Developer Agent Delegation controls
+        lbl_bg_agent_section = QLabel("BACKGROUND DEVELOPER AGENT")
+        lbl_bg_agent_section.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 10px; font-weight: bold; color: #10B981; margin-top: 15px;")
+        layout_system.addWidget(lbl_bg_agent_section)
+
+        agent_cfg = self.config.get("background_agent", {})
+        active_provider = agent_cfg.get("active_provider", "agy")
+        providers = agent_cfg.get("providers", {
+            "agy": "agy --dangerously-skip-permissions --mode accept-edits --print-timeout 20m --print {prompt}",
+            "claude-cli": "claude-cli --prompt {prompt}",
+            "codex": "codex {prompt}",
+            "custom": ""
+        })
+
+        lbl_bg_agent_provider = QLabel("ACTIVE AGENT PROVIDER")
+        lbl_bg_agent_provider.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 8px; font-weight: bold; color: rgba(255,255,255,0.4);")
+        layout_system.addWidget(lbl_bg_agent_provider)
+
+        self.cmb_bg_agent_provider = QComboBox(self)
+        self.cmb_bg_agent_provider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.cmb_bg_agent_provider.setStyleSheet("QComboBox { background-color: rgba(255,255,255,0.05); color: #E5E7EB; border: 1px solid rgba(255,255,255,0.1); padding: 5px; font-family: 'JetBrains Mono'; font-size: 10px; }")
+        self.cmb_bg_agent_provider.addItem("Antigravity CLI (agy)", "agy")
+        self.cmb_bg_agent_provider.addItem("Claude CLI (claude-cli)", "claude-cli")
+        self.cmb_bg_agent_provider.addItem("Codex (codex)", "codex")
+        self.cmb_bg_agent_provider.addItem("Custom Command", "custom")
+        
+        idx = self.cmb_bg_agent_provider.findData(active_provider)
+        if idx >= 0:
+            self.cmb_bg_agent_provider.setCurrentIndex(idx)
+        layout_system.addWidget(self.cmb_bg_agent_provider)
+
+        lbl_bg_agent_template = QLabel("COMMAND TEMPLATE (must contain {prompt})")
+        lbl_bg_agent_template.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 8px; font-weight: bold; color: rgba(255,255,255,0.4);")
+        layout_system.addWidget(lbl_bg_agent_template)
+
+        self.txt_bg_agent_template = QLineEdit(self)
+        self.txt_bg_agent_template.setStyleSheet("QLineEdit { background-color: rgba(255,255,255,0.05); color: #E5E7EB; border: 1px solid rgba(255,255,255,0.1); padding: 5px; font-family: 'JetBrains Mono'; font-size: 10px; }")
+        current_template = providers.get(active_provider, providers.get("agy", ""))
+        self.txt_bg_agent_template.setText(current_template)
+        layout_system.addWidget(self.txt_bg_agent_template)
+
+        def update_template_preset():
+            prov = self.cmb_bg_agent_provider.currentData()
+            cfg_providers = self.config.get("background_agent", {}).get("providers", {
+                "agy": "agy --dangerously-skip-permissions --mode accept-edits --print-timeout 20m --print {prompt}",
+                "claude-cli": "claude-cli --prompt {prompt}",
+                "codex": "codex {prompt}",
+                "custom": ""
+            })
+            self.txt_bg_agent_template.setText(cfg_providers.get(prov, ""))
+            
+        self.cmb_bg_agent_provider.currentIndexChanged.connect(update_template_preset)
 
         # Spacer to push action buttons to the bottom
         layout_system.addSpacing(20)
@@ -1040,6 +1093,17 @@ class EloraHUD(QWidget):
         except ValueError:
             tg_max_file = 50
 
+        bg_agent_provider = self.cmb_bg_agent_provider.currentData()
+        bg_agent_template = self.txt_bg_agent_template.text().strip()
+
+        bg_providers = self.config.get("background_agent", {}).get("providers", {
+            "agy": "agy --dangerously-skip-permissions --mode accept-edits --print-timeout 20m --print {prompt}",
+            "claude-cli": "claude-cli --prompt {prompt}",
+            "codex": "codex {prompt}",
+            "custom": ""
+        })
+        bg_providers[bg_agent_provider] = bg_agent_template
+
         updates = {
             "voice": {
                 "voice_name": selected_voice,
@@ -1066,6 +1130,10 @@ class EloraHUD(QWidget):
                 "token_env_var": tg_token_env,
                 "allowed_user_ids": tg_allowed_ids,
                 "max_file_size_mb": tg_max_file
+            },
+            "background_agent": {
+                "active_provider": bg_agent_provider,
+                "providers": bg_providers
             }
         }
         save_config(updates)

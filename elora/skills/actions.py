@@ -255,10 +255,23 @@ def execute_agent_task(prompt: str) -> str:
         project_dir = base_dir
         os.makedirs(project_dir, exist_ok=True)
         
-    # Locate the absolute path of agy
+    # Load configuration settings for background agent delegation
+    from elora.core.config import load_config
     import shutil
-    agy_path = shutil.which("agy") or "/usr/bin/agy"
+    config = load_config()
+    agent_cfg = config.get("background_agent", {})
+    active_provider = agent_cfg.get("active_provider", "agy")
+    providers = agent_cfg.get("providers", {
+        "agy": "agy --dangerously-skip-permissions --mode accept-edits --print-timeout 20m --print {prompt}",
+        "claude-cli": "claude-cli --prompt {prompt}",
+        "codex": "codex {prompt}",
+        "custom": ""
+    })
     
+    cmd_template = providers.get(active_provider) or providers.get("agy")
+    if not cmd_template:
+        cmd_template = "agy --dangerously-skip-permissions --mode accept-edits --print-timeout 20m --print {prompt}"
+        
     # Construct the tmux shell invocation command safely using shlex.quote
     # We append a workspace hint to the prompt so the background agent knows to initialize
     # files directly inside the current workspace directory (using '.') instead of nesting them.
@@ -266,6 +279,12 @@ def execute_agent_task(prompt: str) -> str:
     prompt_with_hint = prompt + hint
     escaped_prompt = shlex.quote(prompt_with_hint)
     
+    # Interpolate prompt into template
+    if "{prompt}" in cmd_template:
+        inner_cmd = cmd_template.replace("{prompt}", escaped_prompt)
+    else:
+        inner_cmd = f"{cmd_template} {escaped_prompt}"
+        
     # Define log files inside the ~/.config/elora/logs directory
     # Why: Since tmux sessions close automatically when the running command ends (with --print),
     # we pipe stdout/stderr through tee and log to disk so log history is preserved and accessible.
@@ -274,11 +293,6 @@ def execute_agent_task(prompt: str) -> str:
     log_file = os.path.join(log_dir, f"{session_name}.log")
     exit_file = os.path.join(log_dir, f"{session_name}.exit")
     
-    # Run agy with --print (instead of --prompt-interactive) so it exits automatically when done.
-    # We pipe outputs through tee to log_file, capture agy's exit code, write it to exit_file,
-    # and exit the shell with the same code.
-    # We cd to project_dir first before running agy so the agent works in the target folder.
-    inner_cmd = f"{agy_path} --dangerously-skip-permissions --mode accept-edits --print-timeout 20m --print {escaped_prompt}"
     bash_cmd = f"cd {shlex.quote(project_dir)} && {inner_cmd} 2>&1 | tee {shlex.quote(log_file)}; exit_status=${{PIPESTATUS[0]}}; echo \\$exit_status > {shlex.quote(exit_file)}; exit \\$exit_status"
     
     # tmux command: tmux new-session -d -s session_name -c starting_dir "cmd"

@@ -62,6 +62,7 @@ def run_setup_wizard():
     print("2. Speech Feedback (Kokoro Local/Cloud)")
     print("3. Spotify CLI (Music search & playback control)")
     print("4. Google Classroom API (School course work sync)")
+    print("5. Background Developer Agent Delegation (agy, claude-cli, codex, etc.)")
     
     config = load_config()
     
@@ -237,6 +238,59 @@ def run_setup_wizard():
                 print(f"{RED}File not found: {resolved_path}. Skipping credentials setup.{RESET}")
         else:
             print(f"{YELLOW}! Skipped.{RESET}")
+            
+    # ----------------------------------------------------
+    # Step 5: Background Agent Delegation Setup
+    # ----------------------------------------------------
+    print_step(5, "Background Developer Agent Delegation Setup")
+    print("Elora can delegate complex coding or research tasks to a specialized")
+    print("terminal-based agent running inside a background tmux session.")
+    
+    agent_cfg = config.get("background_agent", {})
+    active_provider = agent_cfg.get("active_provider", "agy")
+    providers = agent_cfg.get("providers", {
+        "agy": "agy --dangerously-skip-permissions --mode accept-edits --print-timeout 20m --print {prompt}",
+        "claude-cli": "claude-cli --prompt {prompt}",
+        "codex": "codex {prompt}",
+        "custom": ""
+    })
+    
+    print(f"\nCurrent active background agent: {BOLD}{active_provider}{RESET}")
+    if ask_yes_no("Would you like to configure the background developer agent?", default=True):
+        print("\nSelect background agent provider:")
+        print(f"  1. Antigravity CLI (agy) [current: {'Active' if active_provider == 'agy' else 'Inactive'}]")
+        print(f"  2. Claude CLI (claude-cli) [current: {'Active' if active_provider == 'claude-cli' else 'Inactive'}]")
+        print(f"  3. Codex (codex) [current: {'Active' if active_provider == 'codex' else 'Inactive'}]")
+        print(f"  4. Custom Command Template [current: {'Active' if active_provider == 'custom' else 'Inactive'}]")
+        
+        choice = input(f"\n{BOLD}Choose agent provider (1-4) [1]:{RESET} ").strip()
+        if choice == "2":
+            selected_provider = "claude-cli"
+        elif choice == "3":
+            selected_provider = "codex"
+        elif choice == "4":
+            selected_provider = "custom"
+        else:
+            selected_provider = "agy"
+            
+        if selected_provider == "custom":
+            existing_custom = providers.get("custom", "")
+            print(f"\nEnter custom command template (must contain '{{prompt}}' where the task text should be injected).")
+            new_template = input(f"Custom template [{existing_custom or 'none'}]: ").strip()
+            if new_template:
+                providers["custom"] = new_template
+            elif not existing_custom:
+                providers["custom"] = "claude-cli --prompt {prompt}"
+        
+        agent_updates = {
+            "active_provider": selected_provider,
+            "providers": providers
+        }
+        
+        save_config({"background_agent": agent_updates})
+        print(f"{GREEN}✓ Background developer agent configured successfully.{RESET}")
+    else:
+        print(f"{YELLOW}! Skipped background developer agent setup.{RESET}")
             
     print_header("Configuration Setup Finished!")
     print(f"{GREEN}All configured settings have been saved.{RESET}")

@@ -55,6 +55,15 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         "allowed_user_ids": [],
         "max_file_size_mb": 50
     },
+    "background_agent": {
+        "active_provider": "agy",
+        "providers": {
+            "agy": "agy --dangerously-skip-permissions --mode accept-edits --print-timeout 20m --print {prompt}",
+            "claude-cli": "claude-cli --prompt {prompt}",
+            "codex": "codex {prompt}",
+            "custom": ""
+        }
+    },
     "personality": "default",
     "custom_personality": ""
 }
