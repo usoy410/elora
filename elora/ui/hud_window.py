@@ -84,6 +84,9 @@ class EloraHUD(QWidget):
         
         # Load user configuration
         self.config = load_config()
+        
+        # Track which sessions have already spoken a waiting-for-input alert
+        self.notified_waiting_sessions = set()
 
         # Apply QSS
         self.setStyleSheet(HUD_STYLESHEET)
@@ -821,6 +824,36 @@ class EloraHUD(QWidget):
         self.txt_task_log.setPlaceholderText("Select a running task to view real-time log output...")
         self.tasks_layout.addWidget(self.txt_task_log)
         
+        # Tmux Input Interaction Widget
+        self.tmux_input_widget = QWidget(self)
+        self.tmux_input_layout = QHBoxLayout(self.tmux_input_widget)
+        self.tmux_input_layout.setContentsMargins(0, 0, 0, 0)
+        self.tmux_input_layout.setSpacing(5)
+
+        self.txt_tmux_input = QLineEdit(self)
+        self.txt_tmux_input.setPlaceholderText("Send input / keystrokes to active agent...")
+        self.txt_tmux_input.setStyleSheet("QLineEdit { background-color: rgba(255, 255, 255, 0.05); color: #E5E7EB; border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 5px; font-family: 'JetBrains Mono'; font-size: 10px; }")
+        self.txt_tmux_input.setEnabled(False)
+        self.txt_tmux_input.returnPressed.connect(self.send_tmux_input)
+
+        self.btn_tmux_send = QPushButton("Send", self)
+        self.btn_tmux_send.setEnabled(False)
+        self.btn_tmux_send.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_tmux_send.setStyleSheet("QPushButton { background-color: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.4); color: #34D399; font-family: 'JetBrains Mono'; font-size: 10px; font-weight: bold; width: 60px; padding: 5px; } QPushButton:disabled { background-color: rgba(255,255,255,0.02); border-color: rgba(255,255,255,0.05); color: rgba(255,255,255,0.2); }")
+        self.btn_tmux_send.clicked.connect(self.send_tmux_input)
+
+        self.btn_tmux_attach = QPushButton("Open Terminal", self)
+        self.btn_tmux_attach.setEnabled(False)
+        self.btn_tmux_attach.setIcon(QIcon.fromTheme("utilities-terminal"))
+        self.btn_tmux_attach.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_tmux_attach.setStyleSheet("QPushButton { background-color: rgba(99, 102, 241, 0.2); border: 1px solid rgba(99, 102, 241, 0.4); color: #818CF8; font-family: 'JetBrains Mono'; font-size: 10px; font-weight: bold; padding: 5px; } QPushButton:disabled { background-color: rgba(255,255,255,0.02); border-color: rgba(255,255,255,0.05); color: rgba(255,255,255,0.2); }")
+        self.btn_tmux_attach.clicked.connect(self.attach_tmux_terminal)
+
+        self.tmux_input_layout.addWidget(self.txt_tmux_input)
+        self.tmux_input_layout.addWidget(self.btn_tmux_send)
+        self.tmux_input_layout.addWidget(self.btn_tmux_attach)
+        self.tasks_layout.addWidget(self.tmux_input_widget)
+
         self.tasks_actions = QWidget(self)
         self.tasks_actions_layout = QHBoxLayout(self.tasks_actions)
         self.tasks_actions_layout.setContentsMargins(0, 0, 0, 0)
@@ -1776,12 +1809,21 @@ class EloraHUD(QWidget):
                 is_running = task.get("status") == "running"
                 self.btn_cancel_task.setEnabled(is_running)
                 self.btn_clear_task.setEnabled(not is_running)
+                self.txt_tmux_input.setEnabled(is_running)
+                self.btn_tmux_send.setEnabled(is_running)
+                self.btn_tmux_attach.setEnabled(is_running)
             else:
                 self.btn_cancel_task.setEnabled(False)
                 self.btn_clear_task.setEnabled(False)
+                self.txt_tmux_input.setEnabled(False)
+                self.btn_tmux_send.setEnabled(False)
+                self.btn_tmux_attach.setEnabled(False)
         else:
             self.btn_cancel_task.setEnabled(False)
             self.btn_clear_task.setEnabled(False)
+            self.txt_tmux_input.setEnabled(False)
+            self.btn_tmux_send.setEnabled(False)
+            self.btn_tmux_attach.setEnabled(False)
         self.update_task_log_view()
 
     def update_task_log_view(self):
@@ -1833,11 +1875,123 @@ class EloraHUD(QWidget):
                     
                     self.txt_task_log.setPlainText(cleaned_log)
                     
+                    # Highlight input text box if log indicates it is waiting for stdin
+                    lines = [l.strip() for l in cleaned_log.splitlines() if l.strip()]
+                    waiting_for_input = False
+                    if lines:
+                        last_line = lines[-1].lower()
+                        input_indicators = ["[y/n]", "[y/n]:", "enter your", "password:", "enter:", "confirm?", "choice", "accept?", "enter credentials"]
+                        if any(ind in last_line for ind in input_indicators) or (last_line.endswith("?") and not last_line.startswith("why")):
+                            waiting_for_input = True
+                            
+                    session_name = res.get("session", "unknown")
+                    if waiting_for_input:
+                        self.txt_tmux_input.setStyleSheet(
+                            "QLineEdit { background-color: rgba(245, 158, 11, 0.08); color: #FBBF24; border: 1px solid #F59E0B; border-radius: 4px; padding: 5px; font-family: 'JetBrains Mono'; font-size: 10px; }"
+                        )
+                        self.txt_tmux_input.setPlaceholderText("Task is waiting for input! Type response here...")
+                        
+                        # Verbally speak alert once when the session first enters waiting state
+                        if session_name not in self.notified_waiting_sessions:
+                            self.notified_waiting_sessions.add(session_name)
+                            try:
+                                from elora.ipc.daemon_client import EloraDaemonClient
+                                EloraDaemonClient().send_cmd({
+                                    "cmd": "speak",
+                                    "text": f"Sir, the background task {session_name} is waiting for your input."
+                                })
+                            except Exception as e:
+                                logger.error("Failed to trigger spoken alert for waiting task: %s", e)
+                    else:
+                        self.txt_tmux_input.setStyleSheet(
+                            "QLineEdit { background-color: rgba(255, 255, 255, 0.05); color: #E5E7EB; border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 5px; font-family: 'JetBrains Mono'; font-size: 10px; }"
+                        )
+                        self.txt_tmux_input.setPlaceholderText("Send input / keystrokes to active agent...")
+                        
+                        # Clear from notified set if it is no longer blocked on input
+                        if session_name in self.notified_waiting_sessions:
+                            self.notified_waiting_sessions.discard(session_name)
+                    
                     if at_bottom:
                         scrollbar.setValue(scrollbar.maximum())
         else:
             # Log failed or task not active anymore
             pass
+
+    def send_tmux_input(self):
+        """Sends custom keystrokes directly to the background tmux session."""
+        selected_row = self.tasks_list_widget.currentRow()
+        if selected_row < 0:
+            return
+            
+        selected_item = self.tasks_list_widget.currentItem()
+        if not selected_item:
+            return
+            
+        text = selected_item.text()
+        if " [RUNNING]" not in text:
+            return
+            
+        session_name = text.split(" [RUNNING]")[0].strip()
+        keystrokes = self.txt_tmux_input.text()
+        if not keystrokes:
+            return
+            
+        self.txt_tmux_input.clear()
+        
+        try:
+            subprocess.run(["tmux", "send-keys", "-t", session_name, keystrokes, "C-m"], check=True)
+            self.console_output.append(f"<span style='color: rgba(16, 185, 129, 0.85);'>System:</span> Sent input to tmux: '{keystrokes}'")
+        except Exception as e:
+            logger.error("Failed to send tmux keys: %s", e)
+            self.console_output.append(f"<span style='color: rgba(239, 68, 68, 0.85);'>System Error:</span> Failed to send keystrokes: {e}")
+
+    def attach_tmux_terminal(self):
+        """Spawns a local desktop terminal emulator attached to the selected tmux session."""
+        selected_row = self.tasks_list_widget.currentRow()
+        if selected_row < 0:
+            return
+            
+        selected_item = self.tasks_list_widget.currentItem()
+        if not selected_item:
+            return
+            
+        text = selected_item.text()
+        if " [RUNNING]" not in text:
+            return
+            
+        session_name = text.split(" [RUNNING]")[0].strip()
+        
+        terminal_emulators = [
+            ["x-terminal-emulator", "-e"],
+            ["gnome-terminal", "--", "tmux", "attach-session", "-t"],
+            ["konsole", "-e", "tmux", "attach-session", "-t"],
+            ["kitty", "tmux", "attach-session", "-t"],
+            ["alacritty", "-e", "tmux", "attach-session", "-t"],
+            ["xfce4-terminal", "-e"],
+            ["xterm", "-e"]
+        ]
+        
+        spawned = False
+        import shutil
+        for term in terminal_emulators:
+            exe = term[0]
+            if shutil.which(exe):
+                if exe in ("gnome-terminal", "konsole", "kitty", "alacritty"):
+                    cmd = term + [session_name]
+                else:
+                    cmd = [exe, "-e", f"tmux attach-session -t {session_name}"]
+                
+                try:
+                    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    spawned = True
+                    self.console_output.append(f"<span style='color: rgba(99, 102, 241, 0.85);'>System:</span> Spawning terminal '{exe}' attached to session '{session_name}'")
+                    break
+                except Exception as e:
+                    logger.debug("Failed to spawn %s: %s", exe, e)
+                    
+        if not spawned:
+            self.console_output.append("<span style='color: rgba(239, 68, 68, 0.85);'>System Error:</span> No supported terminal emulator was found on the system. Attach manually by running: <code>tmux attach-session -t " + session_name + "</code>")
 
     def cancel_selected_task(self):
         """Sends cancel command to the daemon for the selected task."""
