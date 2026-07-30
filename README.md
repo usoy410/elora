@@ -285,37 +285,37 @@ Elora can be securely controlled remotely using a Telegram bot. Follow these set
 
 ## Project Structure
 
-*   [main.py](file:///home/usoy/Documents/antigravity/elora/main.py) — Core CLI listener, command route manager, and GUI/HUD/daemon launcher.
+*   [main.py](main.py) — Core CLI listener, command route manager, and GUI/HUD/daemon launcher.
 *   **`elora/`** (Package):
     *   **`core/`**:
-        *   [brain.py](file:///home/usoy/Documents/antigravity/elora/elora/core/brain.py) — Connects to Gemini API, manages prompts, and enforces JSON action schemas.
-        *   [agent.py](file:///home/usoy/Documents/antigravity/elora/elora/core/agent.py) — Manages the multi-turn ReAct reasoning loop and tool execution.
-        *   [config.py](file:///home/usoy/Documents/antigravity/elora/elora/core/config.py) — Dynamic user configuration and session history manager.
-        *   [memory.py](file:///home/usoy/Documents/antigravity/elora/elora/core/memory.py) — Semantic memory store and recall context manager.
+        *   [brain.py](elora/core/brain.py) — Connects to Gemini API, manages prompts, and enforces JSON action schemas.
+        *   [agent.py](elora/core/agent.py) — Manages the multi-turn ReAct reasoning loop and tool execution.
+        *   [config.py](elora/core/config.py) — Dynamic user configuration and session history manager.
+        *   [memory.py](elora/core/memory.py) — Semantic memory store and recall context manager.
     *   **`ipc/`**:
-        *   [daemon.py](file:///home/usoy/Documents/antigravity/elora/elora/ipc/daemon.py) — Persistent UNIX socket server handling energy-based STT silence detection and classroom polling schedules.
-        *   [daemon_client.py](file:///home/usoy/Documents/antigravity/elora/elora/ipc/daemon_client.py) — Socket communication wrapper syncing terminal graphical environment variables.
+        *   [daemon.py](elora/ipc/daemon.py) — Persistent UNIX socket server handling energy-based STT silence detection and classroom polling schedules.
+        *   [daemon_client.py](elora/ipc/daemon_client.py) — Socket communication wrapper syncing terminal graphical environment variables.
     *   **`ui/`**:
-        *   [hud_window.py](file:///home/usoy/Documents/antigravity/elora/elora/ui/hud_window.py) — Main PySide6 dashboard window managing Left-Center-Right layout widget decks.
-        *   [hud_overlay.py](file:///home/usoy/Documents/antigravity/elora/elora/ui/hud_overlay.py) — Transparent blocker overlay managing safe gate action verification modals.
-        *   [voice_orb.py](file:///home/usoy/Documents/antigravity/elora/elora/ui/voice_orb.py) — Animated custom-drawn orb displaying conversational states.
-        *   [cava_visualizer.py](file:///home/usoy/Documents/antigravity/elora/elora/ui/cava_visualizer.py) — Graphical bar visualization parsing cava loopback stdout stream.
-        *   [system_monitor.py](file:///home/usoy/Documents/antigravity/elora/elora/ui/system_monitor.py) — System resource sensors and statistics cards.
-        *   [threads.py](file:///home/usoy/Documents/antigravity/elora/elora/ui/threads.py) — QThread encapsulation for running socket requests asynchronously off the main GUI thread.
-        *   [styles.py](file:///home/usoy/Documents/antigravity/elora/elora/ui/styles.py) — QSS obsidian stylesheet definitions.
+        *   [hud_window.py](elora/ui/hud_window.py) — Main PySide6 dashboard window managing Left-Center-Right layout widget decks.
+        *   [hud_overlay.py](elora/ui/hud_overlay.py) — Transparent blocker overlay managing safe gate action verification modals.
+        *   [voice_orb.py](elora/ui/voice_orb.py) — Animated custom-drawn orb displaying conversational states.
+        *   [cava_visualizer.py](elora/ui/cava_visualizer.py) — Graphical bar visualization parsing cava loopback stdout stream.
+        *   [system_monitor.py](elora/ui/system_monitor.py) — System resource sensors and statistics cards.
+        *   [threads.py](elora/ui/threads.py) — QThread encapsulation for running socket requests asynchronously off the main GUI thread.
+        *   [styles.py](elora/ui/styles.py) — QSS obsidian stylesheet definitions.
     *   **`skills/`**:
-        *   [actions.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/actions.py) — Spawns background agent tasks in tmux sessions and monitors their execution.
-        *   [browser_control.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/browser_control.py) — Remote CDP controller for driving Brave browser actions.
-        *   [classroom.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/classroom.py) — Google Classroom coursework, submissions, and Google Drive attachment parsing.
-        *   [email.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/email.py) — Local IMAP email fetcher and reporting engine.
-        *   [news.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/news.py) — Technical feeds RSS/Playwright parser and formatting tool.
-        *   [os_control.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/os_control.py) — Universal mouse cursor, keyboard type, and screenshot capture simulation.
-        *   [skills.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/skills.py) — DuckDuckGo search and BeautifulSoup web scraping helper.
-        *   [spotify.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/spotify.py) — Fuzzy music search and play integration via spotify-cli and playerctl.
-        *   [stt.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/stt.py) — Backup local RMS silence threshold recorder.
-        *   [system_skills.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/system_skills.py) — OS audio controls, brightness, and application launch helpers.
-        *   [telegram_bot.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/telegram_bot.py) — Long-polling Telegram bot interface for remote system commands, file/screenshot transfers, and task notifications.
-        *   [voice.py](file:///home/usoy/Documents/antigravity/elora/elora/skills/voice.py) — TTS voice synthesis routing and Hugging Face warmup engine.
-    *   [hud.py](file:///home/usoy/Documents/antigravity/elora/elora/hud.py) — Facade router maintaining start_hud imports backward-compatibility.
-    *   [utils.py](file:///home/usoy/Documents/antigravity/elora/elora/utils.py) — Desktop notify-send alerts and sound playing utilities.
+        *   [actions.py](elora/skills/actions.py) — Spawns background agent tasks in tmux sessions and monitors their execution.
+        *   [browser_control.py](elora/skills/browser_control.py) — Remote CDP controller for driving Brave browser actions.
+        *   [classroom.py](elora/skills/classroom.py) — Google Classroom coursework, submissions, and Google Drive attachment parsing.
+        *   [email.py](elora/skills/email.py) — Local IMAP email fetcher and reporting engine.
+        *   [news.py](elora/skills/news.py) — Technical feeds RSS/Playwright parser and formatting tool.
+        *   [os_control.py](elora/skills/os_control.py) — Universal mouse cursor, keyboard type, and screenshot capture simulation.
+        *   [skills.py](elora/skills/skills.py) — DuckDuckGo search and BeautifulSoup web scraping helper.
+        *   [spotify.py](elora/skills/spotify.py) — Fuzzy music search and play integration via spotify-cli and playerctl.
+        *   [stt.py](elora/skills/stt.py) — Backup local RMS silence threshold recorder.
+        *   [system_skills.py](elora/skills/system_skills.py) — OS audio controls, brightness, and application launch helpers.
+        *   [telegram_bot.py](elora/skills/telegram_bot.py) — Long-polling Telegram bot interface for remote system commands, file/screenshot transfers, and task notifications.
+        *   [voice.py](elora/skills/voice.py) — TTS voice synthesis routing and Hugging Face warmup engine.
+    *   [hud.py](elora/hud.py) — Facade router maintaining start_hud imports backward-compatibility.
+    *   [utils.py](elora/utils.py) — Desktop notify-send alerts and sound playing utilities.
 
