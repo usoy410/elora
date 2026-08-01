@@ -46,14 +46,20 @@ def is_gws_authenticated(profile: str = "default") -> bool:
         
     _ensure_gws_profile_creds(profile)
     
-    cmd = ["gws", "auth", "status", "--format", "json"]
+    cmd = ["gws", "auth", "status"]
     env = os.environ.copy()
     if profile and profile != "default":
         env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"] = os.path.expanduser(f"~/.config/elora/gws-{profile}")
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
         if result.returncode == 0:
-            data = json.loads(result.stdout)
+            stdout_clean = result.stdout.strip()
+            while stdout_clean and not stdout_clean.startswith('{'):
+                if '\n' in stdout_clean:
+                    stdout_clean = stdout_clean.split('\n', 1)[-1].strip()
+                else:
+                    break
+            data = json.loads(stdout_clean)
             return data.get("auth_method") != "none"
         return False
     except (subprocess.TimeoutExpired, subprocess.SubprocessError, json.JSONDecodeError) as e:
@@ -149,7 +155,13 @@ def _run_gws(
             return merged, None
         else:
             try:
-                return json.loads(result.stdout), None
+                stdout_clean = result.stdout.strip()
+                while stdout_clean and not (stdout_clean.startswith('{') or stdout_clean.startswith('[')):
+                    if '\n' in stdout_clean:
+                        stdout_clean = stdout_clean.split('\n', 1)[-1].strip()
+                    else:
+                        break
+                return json.loads(stdout_clean), None
             except json.JSONDecodeError:
                 return None, f"Failed to parse JSON output: {result.stdout}"
                 
