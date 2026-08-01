@@ -9,7 +9,6 @@ from typing import Dict, Any, List, Callable, Optional
 
 from elora.core.brain import query_elora
 from elora.skills.skills import search_duckduckgo, scrape_webpage, run_local_command
-from elora.skills.email import fetch_recent_emails
 from elora.skills.classroom import fetch_classroom_data, save_classroom_document
 from elora.skills.workspace import run_workspace_query
 from elora.skills.browser_control import execute_browser_action
@@ -166,7 +165,7 @@ def run_agent_loop(
             
         # Report tool start
         if action in ("web_search", "web_scrape", "command_run", "browser_browse", "browser_click",
-                      "browser_type", "browser_get_elements", "desktop_input", "system_control", "spotify_control", "email_fetch_summary", "classroom_query", "classroom_export_doc", "workspace_query"):
+                      "browser_type", "browser_get_elements", "desktop_input", "system_control", "spotify_control", "classroom_query", "classroom_export_doc", "workspace_query"):
             _report_status({
                 "type": "tool_start",
                 "tool": action,
@@ -214,30 +213,6 @@ def run_agent_loop(
             current_prompt = (
                 f"Acknowledge the document export outcome ('{export_result}') conversationally back to the user. "
                 "Confirm that it has been saved, and present a very brief outline or summary of what was generated, if relevant."
-            )
-
-        elif action == "email_fetch_summary":
-            status_msg = "Fetching unread or recent emails..."
-            logger.info(status_msg)
-            
-            # Run local email fetcher
-            email_result = fetch_recent_emails()
-            
-            _report_status({
-                "type": "tool_output",
-                "tool": "email_fetch_summary",
-                "arguments": args,
-                "output": email_result
-            })
-            
-            # Feed back to the LLM context
-            loop_history.append({"role": "user", "content": f"System Tool Output (email_fetch_summary):\n{email_result}"})
-            current_prompt = (
-                "Analyze the retrieved email list, prioritize the important emails, and summarize them clearly for the user. "
-                "Ensure the summary is highly conversational, flowing, and sounds like a natural spoken response rather than a structured list. "
-                "Do not use robotic headings or uppercase brackets like 'SECURITY ALERT (Google)' or raw numbered bullet points. "
-                "Instead, describe them using natural phrasing and conversational transitions (e.g., 'First, there's a security alert from Google...', "
-                "'Next, we have another alert from Hugging Face...', 'After that, an action required from...', 'And lastly, ...')."
             )
 
         elif action == "web_search":
@@ -562,15 +537,17 @@ def run_agent_loop(
             gws_method = args.get("gws_method", "list")
             gws_params_str = args.get("gws_params", "{}")
             gws_body_str = args.get("gws_body", "")
+            gws_profile = args.get("gws_profile", "default")
             
-            logger.info("Executing workspace query: %s %s %s", gws_service, gws_resource, gws_method)
+            logger.info("Executing workspace query [%s]: %s %s %s", gws_profile, gws_service, gws_resource, gws_method)
             
             workspace_result = run_workspace_query(
                 service=gws_service,
                 resource=gws_resource,
                 method=gws_method,
                 params_json=gws_params_str,
-                body_json=gws_body_str
+                body_json=gws_body_str,
+                gws_profile=gws_profile
             )
             
             _report_status({
@@ -580,7 +557,7 @@ def run_agent_loop(
                 "output": workspace_result
             })
             
-            loop_history.append({"role": "user", "content": f"System Tool Output (workspace_query: {gws_service} {gws_resource} {gws_method}):\n{workspace_result}"})
+            loop_history.append({"role": "user", "content": f"System Tool Output (workspace_query [{gws_profile}]: {gws_service} {gws_resource} {gws_method}):\n{workspace_result}"})
             current_prompt = (
                 f"Analyze the Google Workspace query results for '{gws_service} {gws_resource} {gws_method}' "
                 "and formulate your next response or action. "

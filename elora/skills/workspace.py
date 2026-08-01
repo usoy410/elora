@@ -9,6 +9,7 @@ token management, API versioning, and credential rotation automatically.
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 from typing import Optional, Tuple, List, Dict, Any, Union
@@ -19,14 +20,38 @@ def is_gws_available() -> bool:
     """Checks if gws binary is on PATH."""
     return shutil.which("gws") is not None
 
-def is_gws_authenticated() -> bool:
+def _ensure_gws_profile_creds(profile: str):
+    """
+    Bootstraps a gws profile directory by copying Elora's existing
+    classroom_credentials.json if the profile doesn't have a client_secret.json yet.
+    """
+    config_dir = os.path.expanduser(f"~/.config/elora/gws-{profile}") if profile and profile != "default" else os.path.expanduser("~/.config/gws")
+    os.makedirs(config_dir, exist_ok=True)
+    
+    secret_path = os.path.join(config_dir, "client_secret.json")
+    elora_creds = os.path.expanduser("~/.config/elora/classroom_credentials.json")
+    
+    if not os.path.exists(secret_path) and os.path.exists(elora_creds):
+        try:
+            shutil.copy2(elora_creds, secret_path)
+            logger.info(f"Auto-populated OAuth credentials for gws profile: {profile}")
+        except Exception as e:
+            logger.warning(f"Failed to copy credentials for gws profile {profile}: {e}")
+
+
+def is_gws_authenticated(profile: str = "default") -> bool:
     """Runs `gws auth status` and checks if auth_method is not 'none'."""
     if not is_gws_available():
         return False
+        
+    _ensure_gws_profile_creds(profile)
     
     cmd = ["gws", "auth", "status", "--format", "json"]
+    env = os.environ.copy()
+    if profile and profile != "default":
+        env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"] = os.path.expanduser(f"~/.config/elora/gws-{profile}")
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
         if result.returncode == 0:
             data = json.loads(result.stdout)
             return data.get("auth_method") != "none"
@@ -42,14 +67,21 @@ def _run_gws(
     params: Optional[Dict[str, Any]] = None, 
     body: Optional[Dict[str, Any]] = None, 
     sub_resource: Optional[str] = None, 
-    page_all: bool = False
+    page_all: bool = False,
+    profile: str = "default"
 ) -> Tuple[Union[Dict[str, Any], List[Any], None], Optional[str]]:
     """Core wrapper. Returns (data, error_string). Runs subprocess with timeout=30s."""
     if not is_gws_available():
         return None, "Google Workspace CLI (gws) is not installed. Install it with: npm install -g @anthropic/workspace-cli"
+        
+    _ensure_gws_profile_creds(profile)
     
-    if not is_gws_authenticated() and service != "auth":
-        return None, "Google Workspace CLI is not authenticated. Run 'gws auth login' in your terminal to authenticate, or run 'elora --setup' to configure workspace credentials."
+    auth_cmd = "gws auth login"
+    if profile and profile != "default":
+        auth_cmd = f"GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/elora/gws-{profile} gws auth login"
+
+    if not is_gws_authenticated(profile=profile) and service != "auth":
+        return None, f"Google Workspace CLI is not authenticated. Run '{auth_cmd}' in your terminal to authenticate, or run 'elora --setup' to configure workspace credentials."
 
     # Build the command path: gws <service> <resource> [sub_resource...] <method>
     # The gws CLI uses space-separated tokens for nested resources
@@ -72,11 +104,15 @@ def _run_gws(
     if page_all:
         cmd.append("--page-all")
 
+    env = os.environ.copy()
+    if profile and profile != "default":
+        env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"] = os.path.expanduser(f"~/.config/elora/gws-{profile}")
+
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
         
         if result.returncode == 2:
-            return None, "Google Workspace CLI is not authenticated. Run 'gws auth login' in your terminal to authenticate, or run 'elora --setup' to configure workspace credentials."
+            return None, f"Google Workspace CLI is not authenticated. Run '{auth_cmd}' in your terminal to authenticate, or run 'elora --setup' to configure workspace credentials."
         
         if result.returncode != 0:
             return None, result.stderr.strip()
@@ -147,20 +183,29 @@ def get_coursework(course_id: str, coursework_id: str) -> Tuple[Optional[Dict[st
         params={"courseId": course_id, "id": coursework_id}
     )
 
-def export_drive_file(file_id: str, output_path: str, mime_type: str = "text/plain") -> Tuple[Optional[str], Optional[str]]:
+def export_drive_file(file_id: str, output_path: str, mime_type: str = "text/plain", profile: str = "default") -> Tuple[Optional[str], Optional[str]]:
     """Exports/downloads a Drive file."""
     if not is_gws_available():
         return None, "Google Workspace CLI (gws) is not installed. Install it with: npm install -g @anthropic/workspace-cli"
+        
+    _ensure_gws_profile_creds(profile)
     
-    if not is_gws_authenticated():
-        return None, "Google Workspace CLI is not authenticated. Run 'gws auth login' in your terminal to authenticate, or run 'elora --setup' to configure workspace credentials."
+    auth_cmd = "gws auth login"
+    if profile and profile != "default":
+        auth_cmd = f"GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/elora/gws-{profile} gws auth login"
+
+    if not is_gws_authenticated(profile=profile):
+        return None, f"Google Workspace CLI is not authenticated. Run '{auth_cmd}' in your terminal to authenticate, or run 'elora --setup' to configure workspace credentials."
 
     cmd = ["gws", "drive", "files", "export", "--params", json.dumps({"fileId": file_id, "mimeType": mime_type})]
+    env = os.environ.copy()
+    if profile and profile != "default":
+        env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"] = os.path.expanduser(f"~/.config/elora/gws-{profile}")
     try:
-        result = subprocess.run(cmd, capture_output=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, timeout=30, env=env)
         
         if result.returncode == 2:
-            return None, "Google Workspace CLI is not authenticated. Run 'gws auth login' in your terminal to authenticate, or run 'elora --setup' to configure workspace credentials."
+            return None, f"Google Workspace CLI is not authenticated. Run '{auth_cmd}' in your terminal to authenticate, or run 'elora --setup' to configure workspace credentials."
             
         if result.returncode != 0:
             return None, result.stderr.decode('utf-8', errors='replace').strip()
@@ -204,7 +249,8 @@ def run_workspace_query(
     resource: str,
     method: str = "list",
     params_json: str = "{}",
-    body_json: str = ""
+    body_json: str = "",
+    gws_profile: str = "default"
 ) -> str:
     """
     Generic entry point for the agent's workspace_query action.
@@ -218,9 +264,12 @@ def run_workspace_query(
     if not is_gws_available():
         return "Error: Google Workspace CLI (gws) is not installed. Install it with your package manager."
 
-    if not is_gws_authenticated():
-        return ("Error: Google Workspace CLI is not authenticated. "
-                "Run 'gws auth login' in your terminal to authenticate.")
+    if not is_gws_authenticated(profile=gws_profile):
+        auth_cmd = "gws auth login"
+        if gws_profile and gws_profile != "default":
+            auth_cmd = f"GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/elora/gws-{gws_profile} gws auth login"
+        return (f"Error: Google Workspace CLI is not authenticated. "
+                f"Run '{auth_cmd}' in your terminal to authenticate.")
 
     # Parse params and body from JSON strings
     params = None
@@ -237,7 +286,7 @@ def run_workspace_query(
         except json.JSONDecodeError as e:
             return f"Error: Invalid gws_body JSON: {e}"
 
-    data, err = _run_gws(service, resource, method, params=params, body=body)
+    data, err = _run_gws(service, resource, method, params=params, body=body, profile=gws_profile)
 
     if err:
         return f"Error from Google Workspace: {err}"
