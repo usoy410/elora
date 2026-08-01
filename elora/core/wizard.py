@@ -59,7 +59,7 @@ def run_setup_wizard():
     print("1. Google Gemini API Key (Required for core functionality)")
     print("2. Speech Feedback (Kokoro Local/Cloud)")
     print("3. Spotify CLI (Music search & playback control)")
-    print("4. Google Classroom API (School course work sync)")
+    print("4. Google Workspace API (Classroom, Gmail, Drive sync)")
     print("5. Background Developer Agent Delegation (agy, claude-cli, codex, etc.)")
     
     config = load_config()
@@ -199,19 +199,19 @@ def run_setup_wizard():
             print(f"{YELLOW}! Skipped Spotify authentication since spotify-cli is not installed.{RESET}")
 
     # ----------------------------------------------------
-    # Step 4: Google Classroom API Setup
+    # Step 4: Google Workspace API Setup
     # ----------------------------------------------------
-    print_step(4, "Google Classroom Integration Setup")
-    print("Elora can list pending school assignments and download materials automatically.")
+    print_step(4, "Google Workspace & Classroom Integration Setup")
+    print("Elora can manage Gmail, Calendar, Drive files, and Classroom assignments automatically.")
     print("This requires an OAuth Desktop Credentials JSON file from Google Cloud Console.")
     
     dest_credentials_path = os.path.expanduser("~/.config/elora/classroom_credentials.json")
     
     if os.path.exists(dest_credentials_path):
-        print(f"\n{GREEN}✓ Google Classroom OAuth credentials already configured.{RESET}")
+        print(f"\n{GREEN}✓ Google Workspace OAuth credentials already configured.{RESET}")
         setup_classroom = ask_yes_no("Would you like to replace the credentials?", default=False)
     else:
-        setup_classroom = ask_yes_no("Would you like to configure Google Classroom credentials now?", default=False)
+        setup_classroom = ask_yes_no("Would you like to configure Google Workspace credentials now?", default=False)
         
     if setup_classroom:
         print("\nSetup instructions:")
@@ -227,9 +227,9 @@ def run_setup_wizard():
                 try:
                     os.makedirs(os.path.dirname(dest_credentials_path), exist_ok=True)
                     shutil.copy2(resolved_path, dest_credentials_path)
-                    print(f"{GREEN}✓ Google Classroom credentials copied to {dest_credentials_path}{RESET}")
-                    print("Note: The browser authentication flow will launch automatically the first time you run")
-                    print("a Google Classroom command in Elora.")
+                    print(f"{GREEN}✓ Google Workspace credentials copied to {dest_credentials_path}{RESET}")
+                    print("Note: The browser authentication flow for your personal and work profiles")
+                    print("will launch automatically the first time Elora queries Workspace.")
                 except Exception as e:
                     print(f"{RED}Failed to copy credentials: {e}{RESET}")
             else:
