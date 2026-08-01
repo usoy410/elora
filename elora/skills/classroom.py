@@ -142,7 +142,7 @@ def parse_classroom_date(due_date_dict: dict[str, int], due_time_dict: dict[str,
         return None
 
 
-def fetch_classroom_data(mode: str = "list_pending", coursework_id: str | None = None, course_id: str | None = None) -> str:
+def fetch_classroom_data(mode: str = "list_pending", coursework_id: str | None = None, course_id: str | None = None, gws_profile: str = "default") -> str:
     """
     Main entry point for retrieving Google Classroom assignment details.
     
@@ -155,7 +155,7 @@ def fetch_classroom_data(mode: str = "list_pending", coursework_id: str | None =
     """
     if _use_gws():
         try:
-            courses, err = list_active_courses()
+            courses, err = list_active_courses(profile=gws_profile)
             if err:
                 raise Exception(f"gws error listing courses: {err}")
             
@@ -170,11 +170,11 @@ def fetch_classroom_data(mode: str = "list_pending", coursework_id: str | None =
                     cid = course["id"]
                     cname = course["name"]
                     
-                    coursework_list, err = list_coursework(cid)
+                    coursework_list, err = list_coursework(cid, profile=gws_profile)
                     if err or not coursework_list:
                         continue
                     
-                    sub_list, err = list_student_submissions(cid, "-")
+                    sub_list, err = list_student_submissions(cid, "-", profile=gws_profile)
                     submissions = {sub["courseWorkId"]: sub for sub in (sub_list or [])}
                     
                     for work in coursework_list:
@@ -233,7 +233,7 @@ def fetch_classroom_data(mode: str = "list_pending", coursework_id: str | None =
                 if not course_id or not coursework_id:
                     return "Error: Missing course_id or coursework_id for analyzing materials."
                 
-                work, err = get_coursework(course_id, coursework_id)
+                work, err = get_coursework(course_id, coursework_id, profile=gws_profile)
                 if err or not work:
                     raise Exception(f"gws error getting coursework: {err}")
                     
@@ -262,7 +262,7 @@ def fetch_classroom_data(mode: str = "list_pending", coursework_id: str | None =
                                     tmp_path = tmp.name
                                 
                                 exp_mime = "text/plain" if mimetype == "application/vnd.google-apps.document" else mimetype
-                                _, exp_err = export_drive_file(fid, tmp_path, exp_mime)
+                                _, exp_err = export_drive_file(fid, tmp_path, exp_mime, profile=gws_profile)
                                 
                                 if exp_err:
                                     doc_contents.append(f"*(Failed to fetch attachment '{fname}' due to error: {exp_err})*")
@@ -280,7 +280,7 @@ def fetch_classroom_data(mode: str = "list_pending", coursework_id: str | None =
                                 safe_fname = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', fname)
                                 filepath = os.path.join(save_dir, safe_fname)
                                 
-                                out_path, dl_err = download_drive_file(fid, filepath)
+                                out_path, dl_err = download_drive_file(fid, filepath, profile=gws_profile)
                                 if dl_err:
                                     doc_contents.append(f"*(Failed to download binary attachment '{fname}' due to error: {dl_err})*")
                                 else:

@@ -170,29 +170,31 @@ def _run_gws(
     except Exception as e:
         return None, str(e)
 
-def list_active_courses() -> tuple[list[Any] | None, str | None]:
+def list_active_courses(profile: str = "default") -> tuple[list[Any] | None, str | None]:
     """Lists active courses (studentId=me)."""
-    return _run_gws("classroom", "courses", "list", params={"studentId": "me", "courseStates": "ACTIVE"}, page_all=True)
+    return _run_gws("classroom", "courses", "list", params={"studentId": "me", "courseStates": "ACTIVE"}, page_all=True, profile=profile)
 
-def list_coursework(course_id: str) -> tuple[list[Any] | None, str | None]:
+def list_coursework(course_id: str, profile: str = "default") -> tuple[list[Any] | None, str | None]:
     """Lists coursework for a course."""
-    return _run_gws("classroom", "courses", "list", sub_resource="courseWork", params={"courseId": course_id}, page_all=True)
+    return _run_gws("classroom", "courses", "list", sub_resource="courseWork", params={"courseId": course_id}, page_all=True, profile=profile)
 
-def list_student_submissions(course_id: str, coursework_id: str = "-") -> tuple[list[Any] | None, str | None]:
+def list_student_submissions(course_id: str, coursework_id: str = "-", profile: str = "default") -> tuple[list[Any] | None, str | None]:
     """Lists student submissions."""
     return _run_gws(
         "classroom", "courses", "list", 
         sub_resource="courseWork.studentSubmissions", 
         params={"courseId": course_id, "courseWorkId": coursework_id}, 
-        page_all=True
+        page_all=True,
+        profile=profile
     )
 
-def get_coursework(course_id: str, coursework_id: str) -> tuple[dict[str, Any] | None, str | None]:
+def get_coursework(course_id: str, coursework_id: str, profile: str = "default") -> tuple[dict[str, Any] | None, str | None]:
     """Gets specific coursework."""
     return _run_gws(
         "classroom", "courses", "get", 
         sub_resource="courseWork", 
-        params={"courseId": course_id, "id": coursework_id}
+        params={"courseId": course_id, "id": coursework_id},
+        profile=profile
     )
 
 def export_drive_file(file_id: str, output_path: str, mime_type: str = "text/plain", profile: str = "default") -> tuple[str | None, str | None]:
