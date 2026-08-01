@@ -1413,23 +1413,13 @@ class EloraHUD(QWidget):
         elif etype == "tool_output":
             tool = telemetry.get("tool", "")
             output = telemetry.get("output", "")
-            if output:
-                import html
-                escaped_output = html.escape(str(output).strip())
-                if len(escaped_output) > 600:
-                    escaped_output = escaped_output[:600] + "\n...[truncated for display]"
+            if str(output).strip().lower().startswith("error"):
                 self.console_output.append(
-                    f"<div style='margin-left: 12px; color: #9CA3AF;'>"
-                    f"<div style='color: #34D399; font-size: 11px; margin-bottom: 2px;'>✔️ Tool execution completed:</div>"
-                    f"<pre style='font-family: monospace; font-size: 10px; background-color: rgba(0, 0, 0, 0.25); "
-                    f"padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05); white-space: pre-wrap;'>"
-                    f"{escaped_output}"
-                    f"</pre>"
-                    f"</div>"
+                    "<span style='margin-left: 12px; color: #EF4444; font-size: 11px;'>❌ Tool execution encountered an issue (details sent to Elora).</span>"
                 )
             else:
                 self.console_output.append(
-                    "<span style='margin-left: 12px; color: rgba(255,255,255,0.3); font-size: 11px;'>✔️ Tool execution completed.</span>"
+                    "<span style='margin-left: 12px; color: rgba(255,255,255,0.3); font-size: 11px;'>✔️ Tool execution completed (data sent to Elora).</span>"
                 )
         elif etype == "confirm_request":
             self.console_output.append(
