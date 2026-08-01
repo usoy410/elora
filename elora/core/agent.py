@@ -42,7 +42,7 @@ from elora.skills.workspace import run_workspace_query
 logger = logging.getLogger("elora.agent")
 
 
-def is_visual_query(prompt: str) -> tuple[bool, str]:
+def is_visual_query(prompt: str) -> bool:
     """
     Checks if a query requires visual screen context based on specific visual/GUI keywords.
     
@@ -61,13 +61,7 @@ def is_visual_query(prompt: str) -> tuple[bool, str]:
     }
     
     if any(query in prompt_lower for query in screen_queries):
-        return True, "screen"
-        
-    camera_queries = {
-        "camera", "webcam", "in front of me", "holding", "look at me", "what am i holding"
-    }
-    if any(query in prompt_lower for query in camera_queries):
-        return True, "camera"
+        return True
         
     # Graphical interaction commands that explicitly require visual coordinates or element locating immediately
     interaction_patterns = [
@@ -77,9 +71,9 @@ def is_visual_query(prompt: str) -> tuple[bool, str]:
     ]
     
     if any(pattern in prompt_lower for pattern in interaction_patterns):
-        return True, "screen"
+        return True
         
-    return False, "screen"
+    return False
 
 
 def run_agent_loop(
@@ -87,7 +81,7 @@ def run_agent_loop(
     history: list[dict[str, str]],
     status_callback: Callable[[Any], None] | None = None,
     confirm_callback: Callable[[str, dict[str, Any]], bool] | None = None,
-    screenshot_callback: Callable[[str], bool] | None = None
+    screenshot_callback: Callable[[], bool] | None = None
 ) -> dict[str, Any]:
     """
     Executes the multi-turn ReAct reasoning loop.
@@ -110,7 +104,7 @@ def run_agent_loop(
     loop_history = list(history)  # Shallow copy history to modify locally
     
     # Initialize visual requirement check
-    needs_screenshot, vision_source = is_visual_query(initial_prompt)
+    needs_screenshot = is_visual_query(initial_prompt)
     
     step_count = 0
     max_steps = 5
@@ -142,7 +136,7 @@ def run_agent_loop(
         if needs_screenshot:
             try:
                 if screenshot_callback:
-                    success = screenshot_callback(vision_source)
+                    success = screenshot_callback()
                     if not success:
                         from elora.skills.os_control import capture_desktop_screenshot
                         capture_desktop_screenshot()

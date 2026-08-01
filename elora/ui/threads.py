@@ -50,7 +50,7 @@ class DaemonQueryThread(QThread):
     query_finished = Signal(dict)
     telemetry_received = Signal(dict)
     confirm_requested = Signal(str, dict)
-    screenshot_requested = Signal(str)
+    screenshot_requested = Signal()
 
     def __init__(self, prompt: str, save_history: bool = True):
         super().__init__()
@@ -96,7 +96,7 @@ class DaemonQueryThread(QThread):
                     client.sock.sendall(resp_payload.encode("utf-8"))
                 elif status == "screenshot_request":
                     self.screenshot_event.clear()
-                    self.screenshot_requested.emit(data.get("source", "screen"))
+                    self.screenshot_requested.emit()
                     self.screenshot_event.wait()
                     resp_payload = json.dumps({"cmd": "screenshot_response", "success": self.screenshot_success}) + "\n"
                     client.sock.sendall(resp_payload.encode("utf-8"))
@@ -143,23 +143,76 @@ class NewsFetchThread(QThread):
         self.feeds_fetched.emit(results)
 
 
-class DaemonCommandThread(QThread):
-    """Generic background thread to query the daemon for short tasks."""
-    result_ready = Signal(dict)
-
-    def __init__(self, cmd_payload: dict):
-        super().__init__()
-        self.cmd_payload = cmd_payload
+class TaskListFetchThread(QThread):
+    """Background thread to query the daemon for active tmux tasks."""
+    tasks_fetched = Signal(dict)
 
     def run(self):
         try:
             from elora.ipc.daemon_client import EloraDaemonClient
             client = EloraDaemonClient()
-            res = client.send_cmd(self.cmd_payload)
-            self.result_ready.emit(res)
+            res = client.send_cmd({"cmd": "list_tasks"})
+            self.tasks_fetched.emit(res)
         except Exception as e:
-            logger.error("DaemonCommandThread error for %s: %s", self.cmd_payload.get("cmd"), e)
-            self.result_ready.emit({"status": "error", "message": str(e)})
+            logger.error("TaskListFetchThread error: %s", e)
+            self.tasks_fetched.emit({"status": "error", "message": str(e)})
+
+
+class TaskLogFetchThread(QThread):
+    """Background thread to query the daemon for a specific task's log."""
+    log_fetched = Signal(dict)
+
+    def __init__(self, session: str):
+        super().__init__()
+        self.session = session
+
+    def run(self):
+        try:
+            from elora.ipc.daemon_client import EloraDaemonClient
+            client = EloraDaemonClient()
+            res = client.send_cmd({"cmd": "get_task_log", "session": self.session})
+            self.log_fetched.emit(res)
+        except Exception as e:
+            logger.error("TaskLogFetchThread error for session %s: %s", self.session, e)
+            self.log_fetched.emit({"status": "error", "message": str(e)})
+
+
+class TaskCancelThread(QThread):
+    """Background thread to query the daemon to cancel a specific task."""
+    task_cancelled = Signal(dict)
+
+    def __init__(self, session: str):
+        super().__init__()
+        self.session = session
+
+    def run(self):
+        try:
+            from elora.ipc.daemon_client import EloraDaemonClient
+            client = EloraDaemonClient()
+            res = client.send_cmd({"cmd": "cancel_task", "session": self.session})
+            self.task_cancelled.emit(res)
+        except Exception as e:
+            logger.error("TaskCancelThread error for session %s: %s", self.session, e)
+            self.task_cancelled.emit({"status": "error", "message": str(e)})
+
+
+class TaskRemoveThread(QThread):
+    """Background thread to query the daemon to remove/clear a specific task."""
+    task_removed = Signal(dict)
+
+    def __init__(self, session: str):
+        super().__init__()
+        self.session = session
+
+    def run(self):
+        try:
+            from elora.ipc.daemon_client import EloraDaemonClient
+            client = EloraDaemonClient()
+            res = client.send_cmd({"cmd": "remove_task", "session": self.session})
+            self.task_removed.emit(res)
+        except Exception as e:
+            logger.error("TaskRemoveThread error for session %s: %s", self.session, e)
+            self.task_removed.emit({"status": "error", "message": str(e)})
 
 
 
