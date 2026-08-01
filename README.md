@@ -66,7 +66,8 @@ sequenceDiagram
 *   **Real-time Desktop Vision**: Automatically captures the active desktop or window (supporting Wayland/GNOME via DBus, Wayland/Niri via `grim`, and X11 via PyAutoGUI) to give Gemini direct visual context. HUD automatically hides itself before capturing to ensure a clean desktop view.
 *   **Background Agent Delegation & Monitoring**: Automatically delegates complex coding or research tasks to the Antigravity CLI (`agy`) inside a detached background `tmux` session, releasing your terminal instantly. View real-time log outputs, track running times, and cancel active sessions directly from the HUD dashboard.
 *   **Fuzzy Spotify & Music Control**: Integrates `spotify-cli` and `playerctl` locally to command playback sessions. Supports library-first searches (Liked Songs and playlists) and self-healing active device detection.
-*   **Google Classroom & Calendar Integration**: Fetches assignments, downloads worksheets, alerts upcoming deadlines (<24h), and syncs coursework deliverables directly to Google Calendar.
+*   **Google Workspace CLI (`gws`) Integration**: Elora acts as a frontend to the robust `@anthropic/workspace-cli` to handle seamless Google Workspace querying (Gmail, Calendar, Drive, Sheets, Tasks, and Classroom) via standard subprocesses without requiring fragile manual OAuth setups.
+*   **Google Classroom & Calendar Integration**: Fetches assignments, downloads worksheets, alerts upcoming deadlines (<24h), and syncs coursework deliverables directly to Google Calendar via `gws` (with legacy fallback).
 *   **Local IMAP Email Reporting**: Securely connects to your IMAP mail server (e.g., Gmail) to fetch and summarize unread or recent emails. Extracts metadata (From, Subject, Date) and parses plain-text or HTML bodies dynamically (stripping boilerplate HTML and truncating snippets to prevent LLM context inflation) for direct vocal summary or HUD display.
 *   **Telegram Remote Control Bot**: Starts a secure background listener (`elora --telegram`) that allows you to command your system remotely via Telegram. Supports processing natural language text commands, downloading and transcribing voice notes to execute tasks, sending photos as visual context, requesting desktop screenshots, zipping and downloading project directories (with default folder exclusions), and tracking running background agent tasks.
 *   **Semantic Memory Engine**: Persistent database storing personal preferences, server settings, and configurations. Supports recall, topic filtering, targeted focus blocks, and forgetting.
@@ -86,6 +87,7 @@ Ensure the following tools are installed on your Linux system:
 *   `tmux` (terminal multiplexer)
 *   `notify-send` (libnotify)
 *   `aplay` / `mpv` (sound players)
+*   [`gws`](https://www.npmjs.com/package/@anthropic/workspace-cli) (Google Workspace CLI for Workspace API access)
 
 ### Installation
 
@@ -108,7 +110,7 @@ an interactive setup wizard will guide you through:
 1. **Google Gemini API Key**: Links your Google AI Studio API key (obtain a free key from [Google AI Studio](https://aistudio.google.com/)).
 2. **Speech & Voice Feedback**: Selects between a local offline speech engine (Kokoro-ONNX) or cloud engine (waking up a custom Hugging Face Space).
 3. **Spotify Music Control**: Detects, installs, and logs you into `spotify-cli` (`spotify-cli auth login` is run directly from the wizard).
-4. **Google Classroom Integration**: Sets up the Google Cloud credentials JSON file path for listing pending coursework.
+4. **Google Workspace Integration**: Instructs you to run `gws auth login` to authenticate with your Google Workspace account for Classroom, Gmail, Calendar, and Drive integration (includes legacy OAuth fallback for Classroom).
 
 ---
 

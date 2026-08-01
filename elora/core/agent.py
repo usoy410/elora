@@ -11,6 +11,7 @@ from elora.core.brain import query_elora
 from elora.skills.skills import search_duckduckgo, scrape_webpage, run_local_command
 from elora.skills.email import fetch_recent_emails
 from elora.skills.classroom import fetch_classroom_data, save_classroom_document
+from elora.skills.workspace import run_workspace_query
 from elora.skills.browser_control import execute_browser_action
 from elora.skills.os_control import move_mouse_smoothly, click_mouse_at, type_keyboard_text
 from elora.skills.system_skills import set_system_volume, set_system_brightness, perform_window_action, launch_application
@@ -165,7 +166,7 @@ def run_agent_loop(
             
         # Report tool start
         if action in ("web_search", "web_scrape", "command_run", "browser_browse", "browser_click",
-                      "browser_type", "browser_get_elements", "desktop_input", "system_control", "spotify_control", "email_fetch_summary", "classroom_query", "classroom_export_doc"):
+                      "browser_type", "browser_get_elements", "desktop_input", "system_control", "spotify_control", "email_fetch_summary", "classroom_query", "classroom_export_doc", "workspace_query"):
             _report_status({
                 "type": "tool_start",
                 "tool": action,
@@ -554,6 +555,38 @@ def run_agent_loop(
                     "Ensure your reply is highly conversational, clear, flowing, and directly confirms the action or explains the error."
                 )
             
+            
+        elif action == "workspace_query":
+            gws_service = args.get("gws_service", "")
+            gws_resource = args.get("gws_resource", "")
+            gws_method = args.get("gws_method", "list")
+            gws_params_str = args.get("gws_params", "{}")
+            gws_body_str = args.get("gws_body", "")
+            
+            logger.info("Executing workspace query: %s %s %s", gws_service, gws_resource, gws_method)
+            
+            workspace_result = run_workspace_query(
+                service=gws_service,
+                resource=gws_resource,
+                method=gws_method,
+                params_json=gws_params_str,
+                body_json=gws_body_str
+            )
+            
+            _report_status({
+                "type": "tool_output",
+                "tool": "workspace_query",
+                "arguments": args,
+                "output": workspace_result
+            })
+            
+            loop_history.append({"role": "user", "content": f"System Tool Output (workspace_query: {gws_service} {gws_resource} {gws_method}):\n{workspace_result}"})
+            current_prompt = (
+                f"Analyze the Google Workspace query results for '{gws_service} {gws_resource} {gws_method}' "
+                "and formulate your next response or action. "
+                "Ensure your reply is highly conversational, clear, flowing, and directly answers what the user asked."
+            )
+
         else:
             logger.warning("Agent encountered unknown action: %s", action)
             # Inject spoke_already flag even in limits/errors if returning result

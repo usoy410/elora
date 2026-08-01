@@ -13,6 +13,21 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 
+try:
+    from elora.skills.workspace import (
+        is_gws_available, is_gws_authenticated,
+        list_active_courses, list_coursework, list_student_submissions,
+        get_coursework, get_drive_file_metadata, export_drive_file,
+        insert_calendar_event, get_calendar_event, update_calendar_event,
+    )
+    _GWS_IMPORTS_OK = True
+except ImportError:
+    _GWS_IMPORTS_OK = False
+
+def _use_gws() -> bool:
+    """Determines if the gws CLI backend should be used for API calls."""
+    return _GWS_IMPORTS_OK and is_gws_available() and is_gws_authenticated()
+
 logger = logging.getLogger("elora.skills.classroom")
 
 # Standard XDG configuration directory
@@ -127,7 +142,150 @@ def fetch_classroom_data(mode: str = "list_pending", coursework_id: Optional[str
       - 'list_pending': Retrieves all active coursework across courses that are not turned in.
       - 'due_soon': Retrieves pending coursework due in the next 7 days.
       - 'analyze_materials': Downloads/reads files attached to coursework_id in course_id.
+      
+    Uses gws as the primary backend with automatic fallback to legacy OAuth.
     """
+    if _use_gws():
+        try:
+            courses, err = list_active_courses()
+            if err:
+                raise Exception(f"gws error listing courses: {err}")
+            
+            if not courses:
+                return "You are not enrolled in any active Google Classroom courses."
+
+            now = datetime.datetime.now()
+
+            if mode in ("list_pending", "due_soon"):
+                pending_list = []
+                for course in courses:
+                    cid = course["id"]
+                    cname = course["name"]
+                    
+                    coursework_list, err = list_coursework(cid)
+                    if err or not coursework_list:
+                        continue
+                    
+                    sub_list, err = list_student_submissions(cid, "-")
+                    submissions = {sub["courseWorkId"]: sub for sub in (sub_list or [])}
+                    
+                    for work in coursework_list:
+                        wid = work["id"]
+                        title = work["title"]
+                        desc = work.get("description", "")
+                        
+                        sub = submissions.get(wid)
+                        sub_state = sub.get("state", "ASSIGNED") if sub else "ASSIGNED"
+                        
+                        if sub_state in ("TURNED_IN", "RETURNED"):
+                            continue
+                            
+                        due_date_raw = work.get("dueDate")
+                        due_time_raw = work.get("dueTime")
+                        due_dt = parse_classroom_date(due_date_raw, due_time_raw)
+                        
+                        if mode == "due_soon":
+                            if not due_dt:
+                                continue
+                            delta = due_dt - now
+                            if not (datetime.timedelta(days=0) <= delta <= datetime.timedelta(days=7)):
+                                continue
+                        
+                        due_str = due_dt.strftime("%Y-%m-%d %H:%M") if due_dt else "No due date"
+                        pending_list.append({
+                            "course_name": cname,
+                            "course_id": cid,
+                            "id": wid,
+                            "title": title,
+                            "description": desc,
+                            "due_date": due_str,
+                            "state": sub_state
+                        })
+                
+                if not pending_list:
+                    if mode == "due_soon":
+                        return "Great news! You have no assignments due in the next 7 days."
+                    return "Excellent work! You have no pending or missing assignments in Google Classroom."
+
+                lines = [f"## Google Classroom Assignments ({'Due Soon' if mode == 'due_soon' else 'Pending'}):"]
+                for i, p in enumerate(pending_list, 1):
+                    desc_snippet = p["description"][:120].replace("\n", " ") + "..." if p["description"] else "No instructions provided."
+                    lines.append(
+                        f"### {i}. {p['title']}\n"
+                        f"- **Class**: {p['course_name']}\n"
+                        f"- **Due Date**: {p['due_date']}\n"
+                        f"- **Status**: {p['state']}\n"
+                        f"- **Description**: {desc_snippet}\n"
+                        f"- **IDs**: Course ID `{p['course_id']}`, Assignment ID `{p['id']}`\n"
+                        f"---"
+                    )
+                return "\n".join(lines)
+
+            elif mode == "analyze_materials":
+                if not course_id or not coursework_id:
+                    return "Error: Missing course_id or coursework_id for analyzing materials."
+                
+                work, err = get_coursework(course_id, coursework_id)
+                if err or not work:
+                    raise Exception(f"gws error getting coursework: {err}")
+                    
+                title = work["title"]
+                desc = work.get("description", "No description provided.")
+                materials = work.get("materials", [])
+                
+                import tempfile
+                doc_contents = []
+                for mat in materials:
+                    drive_file = mat.get("driveFile")
+                    if drive_file:
+                        fid = drive_file["driveFile"]["id"]
+                        fname = drive_file["driveFile"]["title"]
+                        
+                        file_meta, err = get_drive_file_metadata(fid)
+                        if err or not file_meta:
+                            doc_contents.append(f"*(Drive File attached: '{fname}' - Could not access Drive API)*")
+                            continue
+                            
+                        mimetype = file_meta.get("mimeType", "")
+                        
+                        try:
+                            if mimetype == "application/vnd.google-apps.document" or mimetype.startswith("text/"):
+                                with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                                    tmp_path = tmp.name
+                                
+                                exp_mime = "text/plain" if mimetype == "application/vnd.google-apps.document" else mimetype
+                                _, exp_err = export_drive_file(fid, tmp_path, exp_mime)
+                                
+                                if exp_err:
+                                    doc_contents.append(f"*(Failed to fetch attachment '{fname}' due to error: {exp_err})*")
+                                else:
+                                    with open(tmp_path, "r", encoding="utf-8", errors="replace") as f:
+                                        text_content = f.read()
+                                    header = "Attached Document" if mimetype == "application/vnd.google-apps.document" else "Attached File"
+                                    doc_contents.append(f"### {header}: {fname}\n{text_content}")
+                                    
+                                os.remove(tmp_path)
+                            else:
+                                doc_contents.append(f"*(Attached File: '{fname}' of type {mimetype} is currently not exportable as plain text)*")
+                        except Exception as e:
+                            logger.warning("Failed to fetch attachment %s: %s", fname, e)
+                            doc_contents.append(f"*(Failed to fetch attachment '{fname}' due to error: {e})*")
+                
+                output = [
+                    f"# Assignment: {title}",
+                    f"## Classroom Instructions:\n{desc}",
+                ]
+                if doc_contents:
+                    output.append("## Attachment Contents:\n" + "\n\n".join(doc_contents))
+                else:
+                    output.append("*(No text-readable attachments found)*")
+                    
+                return "\n".join(output)
+            else:
+                return f"Error: Unknown classroom mode '{mode}'"
+        except Exception as e:
+            logger.warning("gws fetch_classroom_data failed, falling back to legacy: %s", e)
+
     if not os.path.exists(CREDENTIALS_PATH) and not os.path.exists(TOKEN_PATH):
         return (
             "Error: Google Classroom credentials are missing. Please complete the following steps:\n"
@@ -294,7 +452,75 @@ def get_pending_assignments_raw() -> Optional[List[Dict[str, Any]]]:
     """
     Fetches all pending assignments (not TURNED_IN or RETURNED) across active courses.
     Returns raw dictionaries containing assignment and course details, or None if connection failed.
+    
+    Uses gws as the primary backend with automatic fallback to legacy OAuth.
     """
+    if _use_gws():
+        try:
+            courses, err = list_active_courses()
+            if err:
+                raise Exception(err)
+            
+            if not courses:
+                return []
+                
+            pending_list = []
+            for course in courses:
+                cid = course["id"]
+                cname = course["name"]
+                
+                coursework_list, err = list_coursework(cid)
+                if err or not coursework_list:
+                    continue
+                    
+                sub_list, err = list_student_submissions(cid, "-")
+                submissions = {sub["courseWorkId"]: sub for sub in (sub_list or [])}
+                
+                for work in coursework_list:
+                    wid = work["id"]
+                    title = work["title"]
+                    desc = work.get("description", "")
+                    
+                    sub = submissions.get(wid)
+                    sub_state = sub.get("state", "ASSIGNED") if sub else "ASSIGNED"
+                    
+                    if sub_state in ("TURNED_IN", "RETURNED"):
+                        continue
+                        
+                    due_date_raw = work.get("dueDate")
+                    due_time_raw = work.get("dueTime")
+                    due_dt = parse_classroom_date(due_date_raw, due_time_raw)
+                    due_str = due_dt.isoformat() if due_dt else None
+                    
+                    creation_time_raw = work.get("creationTime")
+                    creation_str = None
+                    if creation_time_raw:
+                        try:
+                            if creation_time_raw.endswith("Z"):
+                                creation_time_raw = creation_time_raw[:-1] + "+00:00"
+                            dt_aware = datetime.datetime.fromisoformat(creation_time_raw)
+                            dt_local = dt_aware.astimezone()
+                            creation_str = dt_local.replace(tzinfo=None).isoformat()
+                        except Exception as parse_err:
+                            logger.warning("Failed to parse creationTime %s: %s", creation_time_raw, parse_err)
+                            
+                    work_type = work.get("workType", "ASSIGNMENT")
+                    
+                    pending_list.append({
+                        "course_name": cname,
+                        "course_id": cid,
+                        "id": wid,
+                        "title": title,
+                        "description": desc,
+                        "due_date": due_str,
+                        "state": sub_state,
+                        "work_type": work_type,
+                        "creation_time": creation_str
+                    })
+            return pending_list
+        except Exception as e:
+            logger.warning("gws get_pending_assignments_raw failed, falling back to legacy: %s", e)
+
     classroom = get_service("classroom", "v1", allow_interactive=False)
     if not classroom:
         logger.warning("Google Classroom service initialization failed.")
@@ -386,11 +612,6 @@ def sync_assignment_to_calendar(assignment: Dict[str, Any]) -> bool:
     Syncs a single assignment to the user's primary Google Calendar as a 1-hour event ending at the due date.
     Uses a deterministic event ID to prevent duplicates.
     """
-    calendar_service = get_service("calendar", "v3", allow_interactive=False)
-    if not calendar_service:
-        logger.warning("Google Calendar service initialization failed.")
-        return False
-        
     due_date_str = assignment.get("due_date")
     if not due_date_str:
         # Assignment has no due date, skip calendar sync
@@ -426,6 +647,29 @@ def sync_assignment_to_calendar(assignment: Dict[str, Any]) -> bool:
             }
         }
         
+        if _use_gws():
+            try:
+                evt, err = get_calendar_event(event_id)
+                if not err and evt:
+                    _, err = update_calendar_event(event_id, event_body)
+                    if err:
+                        raise Exception(f"Failed to update event: {err}")
+                    logger.info("Updated Google Calendar event via gws for coursework %s", assignment['id'])
+                else:
+                    _, err = insert_calendar_event(event_body)
+                    if err:
+                        raise Exception(f"Failed to insert event: {err}")
+                    logger.info("Created new Google Calendar event via gws for coursework %s", assignment['id'])
+                return True
+            except Exception as e:
+                logger.warning("gws sync_assignment_to_calendar failed, falling back to legacy: %s", e)
+
+        # Legacy fallback
+        calendar_service = get_service("calendar", "v3", allow_interactive=False)
+        if not calendar_service:
+            logger.warning("Google Calendar service initialization failed.")
+            return False
+            
         try:
             # Check if event already exists
             calendar_service.events().get(calendarId="primary", eventId=event_id).execute()
