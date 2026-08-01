@@ -324,3 +324,34 @@ def run_workspace_query(
         return formatted
     except (TypeError, ValueError):
         return str(data)
+
+def download_drive_file(file_id: str, output_path: str, profile: str = "default") -> tuple[str | None, str | None]:
+    """Downloads a Drive file's binary content using alt=media."""
+    if not is_gws_available():
+        return None, "Google Workspace CLI (gws) is not installed."
+        
+    _ensure_gws_profile_creds(profile)
+    
+    auth_cmd = "gws auth login"
+    if profile and profile != "default":
+        auth_cmd = f"GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/elora/gws-{profile} gws auth login"
+
+    if not is_gws_authenticated(profile=profile):
+        return None, f"Google Workspace CLI is not authenticated. Run '{auth_cmd}' in your terminal to authenticate."
+
+    cmd = ["gws", "drive", "files", "get", "--params", json.dumps({"fileId": file_id, "alt": "media"}), "-o", output_path]
+    env = os.environ.copy()
+    if profile and profile != "default":
+        env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"] = os.path.expanduser(f"~/.config/elora/gws-{profile}")
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=120, env=env)
+        
+        if result.returncode == 2:
+            return None, f"Google Workspace CLI is not authenticated."
+            
+        if result.returncode != 0:
+            return None, result.stderr.decode('utf-8', errors='replace').strip()
+            
+        return output_path, None
+    except subprocess.TimeoutExpired:
+        return None, "Command timed out after 120 seconds"

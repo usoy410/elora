@@ -16,6 +16,7 @@ from googleapiclient.discovery import build
 try:
     from elora.skills.workspace import (
         export_drive_file,
+        download_drive_file,
         get_calendar_event,
         get_coursework,
         get_drive_file_metadata,
@@ -273,7 +274,17 @@ def fetch_classroom_data(mode: str = "list_pending", coursework_id: str | None =
                                     
                                 os.remove(tmp_path)
                             else:
-                                doc_contents.append(f"*(Attached File: '{fname}' of type {mimetype} is currently not exportable as plain text)*")
+                                save_dir = os.path.expanduser("~/Documents/EloraWorkspace/Classroom")
+                                os.makedirs(save_dir, exist_ok=True)
+                                import re
+                                safe_fname = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', fname)
+                                filepath = os.path.join(save_dir, safe_fname)
+                                
+                                out_path, dl_err = download_drive_file(fid, filepath)
+                                if dl_err:
+                                    doc_contents.append(f"*(Failed to download binary attachment '{fname}' due to error: {dl_err})*")
+                                else:
+                                    doc_contents.append(f"*(Attached File: '{fname}' is a binary file ({mimetype}). It has been automatically downloaded to: {out_path} )*")
                         except Exception as e:
                             logger.warning("Failed to fetch attachment %s: %s", fname, e)
                             doc_contents.append(f"*(Failed to fetch attachment '{fname}' due to error: {e})*")
@@ -431,7 +442,20 @@ def fetch_classroom_data(mode: str = "list_pending", coursework_id: str | None =
                             text_content = text_bytes.decode("utf-8", errors="replace")
                             doc_contents.append(f"### Attached File: {fname}\n{text_content}")
                         else:
-                            doc_contents.append(f"*(Attached File: '{fname}' of type {mimetype} is currently not exportable as plain text)*")
+                            # Download binary files (PDFs, docx, etc) to EloraWorkspace
+                            binary_bytes = drive.files().get_media(fileId=fid).execute()
+                            save_dir = os.path.expanduser("~/Documents/EloraWorkspace/Classroom")
+                            os.makedirs(save_dir, exist_ok=True)
+                            
+                            # Sanitize filename
+                            import re
+                            safe_fname = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', fname)
+                            filepath = os.path.join(save_dir, safe_fname)
+                            
+                            with open(filepath, 'wb') as f:
+                                f.write(binary_bytes)
+                                
+                            doc_contents.append(f"*(Attached File: '{fname}' is a binary file ({mimetype}). It has been automatically downloaded to: {filepath} )*")
                     except Exception as e:
                         logger.warning("Failed to fetch attachment %s: %s", fname, e)
                         doc_contents.append(f"*(Failed to fetch attachment '{fname}' due to error: {e})*")
