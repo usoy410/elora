@@ -273,6 +273,16 @@ def run_workspace_query(
     Calendar, Drive, Sheets, Tasks, etc.) without needing a dedicated skill
     function for each endpoint.
     """
+    if gws_profile:
+        import re
+        match = re.search(r'^[a-zA-Z0-9_-]+', gws_profile.strip())
+        if not match:
+            # If it's a hallucinated long string, just try to extract the first valid word
+            match = re.search(r'[a-zA-Z0-9_-]+', gws_profile)
+        gws_profile = match.group(0) if match else "default"
+    else:
+        gws_profile = "default"
+
     if not is_gws_available():
         return "Error: Google Workspace CLI (gws) is not installed. Install it with your package manager."
 
