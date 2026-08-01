@@ -66,6 +66,21 @@ def is_gws_authenticated(profile: str = "default") -> bool:
         logger.warning(f"Failed to check gws auth status: {e}")
         return False
 
+def _check_gws_auth(profile: str = "default") -> tuple[bool, str]:
+    if not is_gws_available():
+        return False, "Google Workspace CLI (gws) is not installed. Install it with: npm install -g @anthropic/workspace-cli"
+        
+    _ensure_gws_profile_creds(profile)
+    
+    auth_cmd = "gws auth login"
+    if profile and profile != "default":
+        auth_cmd = f"GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/elora/gws-{profile} gws auth login"
+
+    if not is_gws_authenticated(profile=profile):
+        return False, f"Google Workspace CLI is not authenticated. Run '{auth_cmd}' in your terminal to authenticate, or run 'elora --setup' to configure workspace credentials."
+        
+    return True, ""
+
 def _run_gws(
     service: str, 
     resource: str, 
@@ -77,17 +92,10 @@ def _run_gws(
     profile: str = "default"
 ) -> tuple[dict[str, Any] | list[Any] | None, str | None]:
     """Core wrapper. Returns (data, error_string). Runs subprocess with timeout=30s."""
-    if not is_gws_available():
-        return None, "Google Workspace CLI (gws) is not installed. Install it with: npm install -g @anthropic/workspace-cli"
-        
-    _ensure_gws_profile_creds(profile)
-    
-    auth_cmd = "gws auth login"
-    if profile and profile != "default":
-        auth_cmd = f"GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/elora/gws-{profile} gws auth login"
-
-    if not is_gws_authenticated(profile=profile) and service != "auth":
-        return None, f"Google Workspace CLI is not authenticated. Run '{auth_cmd}' in your terminal to authenticate, or run 'elora --setup' to configure workspace credentials."
+    if service != "auth":
+        ok, err_msg = _check_gws_auth(profile)
+        if not ok:
+            return None, err_msg
 
     # Build the command path: gws <service> <resource> [sub_resource...] <method>
     # The gws CLI uses space-separated tokens for nested resources
@@ -199,17 +207,9 @@ def get_coursework(course_id: str, coursework_id: str, profile: str = "default")
 
 def export_drive_file(file_id: str, output_path: str, mime_type: str = "text/plain", profile: str = "default") -> tuple[str | None, str | None]:
     """Exports/downloads a Drive file."""
-    if not is_gws_available():
-        return None, "Google Workspace CLI (gws) is not installed. Install it with: npm install -g @anthropic/workspace-cli"
-        
-    _ensure_gws_profile_creds(profile)
-    
-    auth_cmd = "gws auth login"
-    if profile and profile != "default":
-        auth_cmd = f"GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/elora/gws-{profile} gws auth login"
-
-    if not is_gws_authenticated(profile=profile):
-        return None, f"Google Workspace CLI is not authenticated. Run '{auth_cmd}' in your terminal to authenticate, or run 'elora --setup' to configure workspace credentials."
+    ok, err_msg = _check_gws_auth(profile)
+    if not ok:
+        return None, err_msg
 
     cmd = ["gws", "drive", "files", "export", "--params", json.dumps({"fileId": file_id, "mimeType": mime_type})]
     env = os.environ.copy()
@@ -329,17 +329,9 @@ def run_workspace_query(
 
 def download_drive_file(file_id: str, output_path: str, profile: str = "default") -> tuple[str | None, str | None]:
     """Downloads a Drive file's binary content using alt=media."""
-    if not is_gws_available():
-        return None, "Google Workspace CLI (gws) is not installed."
-        
-    _ensure_gws_profile_creds(profile)
-    
-    auth_cmd = "gws auth login"
-    if profile and profile != "default":
-        auth_cmd = f"GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/elora/gws-{profile} gws auth login"
-
-    if not is_gws_authenticated(profile=profile):
-        return None, f"Google Workspace CLI is not authenticated. Run '{auth_cmd}' in your terminal to authenticate."
+    ok, err_msg = _check_gws_auth(profile)
+    if not ok:
+        return None, err_msg
 
     cmd = ["gws", "drive", "files", "get", "--params", json.dumps({"fileId": file_id, "alt": "media"}), "-o", output_path]
     env = os.environ.copy()

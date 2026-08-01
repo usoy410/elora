@@ -276,8 +276,7 @@ def fetch_classroom_data(mode: str = "list_pending", coursework_id: str | None =
                             else:
                                 save_dir = os.path.expanduser("~/Documents/EloraWorkspace/Classroom")
                                 os.makedirs(save_dir, exist_ok=True)
-                                import re
-                                safe_fname = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', fname)
+                                safe_fname = fname.replace('/', '_')
                                 filepath = os.path.join(save_dir, safe_fname)
                                 
                                 out_path, dl_err = download_drive_file(fid, filepath, profile=gws_profile)
@@ -448,8 +447,7 @@ def fetch_classroom_data(mode: str = "list_pending", coursework_id: str | None =
                             os.makedirs(save_dir, exist_ok=True)
                             
                             # Sanitize filename
-                            import re
-                            safe_fname = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', fname)
+                            safe_fname = fname.replace('/', '_')
                             filepath = os.path.join(save_dir, safe_fname)
                             
                             with open(filepath, 'wb') as f:

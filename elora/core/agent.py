@@ -190,12 +190,7 @@ def run_agent_loop(
             mode_val = args.get("mode", "list_pending")
             cw_id = args.get("coursework_id")
             c_id = args.get("course_id")
-            
-            import re
-            raw_profile = args.get("gws_profile", "default")
-            prof_val = re.sub(r'[^a-zA-Z0-9_-]', '', raw_profile.split('\n')[0].split()[0])
-            if not prof_val:
-                prof_val = "default"
+            prof_val = args.get("gws_profile", "default")
             
             logger.info("Executing classroom query with mode %s using profile %s", mode_val, prof_val)
             classroom_result = fetch_classroom_data(mode=mode_val, coursework_id=cw_id, course_id=c_id, gws_profile=prof_val)
