@@ -241,6 +241,17 @@ def fetch_classroom_data(mode: str = "list_pending", coursework_id: str | None =
                 desc = work.get("description", "No description provided.")
                 materials = work.get("materials", [])
                 
+                # Determine folder structure
+                courses, _ = list_active_courses(profile=gws_profile)
+                cname = next((c["name"] for c in (courses or []) if c["id"] == course_id), "Course_Unknown").replace('/', '_')
+                
+                due = work.get("dueDate")
+                if due:
+                    date_str = f"{due.get('year', 0):04d}-{due.get('month', 0):02d}-{due.get('day', 0):02d}"
+                else:
+                    date_str = work.get("creationTime", "0000-00-00")[:10]
+                safe_work_title = f"{date_str}-{title}".replace('/', '_')
+                
                 import tempfile
                 doc_contents = []
                 for mat in materials:
@@ -274,7 +285,7 @@ def fetch_classroom_data(mode: str = "list_pending", coursework_id: str | None =
                                     
                                 os.remove(tmp_path)
                             else:
-                                save_dir = os.path.expanduser("~/Documents/EloraWorkspace/Classroom")
+                                save_dir = os.path.expanduser(f"~/Documents/EloraWorkspace/Classroom/{cname}/{safe_work_title}")
                                 os.makedirs(save_dir, exist_ok=True)
                                 safe_fname = fname.replace('/', '_')
                                 filepath = os.path.join(save_dir, safe_fname)
@@ -411,6 +422,20 @@ def fetch_classroom_data(mode: str = "list_pending", coursework_id: str | None =
             desc = work.get("description", "No description provided.")
             materials = work.get("materials", [])
             
+            # Determine folder structure
+            try:
+                course_obj = classroom.courses().get(id=course_id).execute()
+                cname = course_obj.get("name", "Course_Unknown").replace('/', '_')
+            except Exception:
+                cname = "Course_Unknown"
+                
+            due = work.get("dueDate")
+            if due:
+                date_str = f"{due.get('year', 0):04d}-{due.get('month', 0):02d}-{due.get('day', 0):02d}"
+            else:
+                date_str = work.get("creationTime", "0000-00-00")[:10]
+            safe_work_title = f"{date_str}-{title}".replace('/', '_')
+            
             drive = get_service("drive", "v3")
             doc_contents = []
             
@@ -443,7 +468,7 @@ def fetch_classroom_data(mode: str = "list_pending", coursework_id: str | None =
                         else:
                             # Download binary files (PDFs, docx, etc) to EloraWorkspace
                             binary_bytes = drive.files().get_media(fileId=fid).execute()
-                            save_dir = os.path.expanduser("~/Documents/EloraWorkspace/Classroom")
+                            save_dir = os.path.expanduser(f"~/Documents/EloraWorkspace/Classroom/{cname}/{safe_work_title}")
                             os.makedirs(save_dir, exist_ok=True)
                             
                             # Sanitize filename
