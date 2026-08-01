@@ -26,7 +26,7 @@ info "Starting Elora installation..."
 info "Checking system requirements..."
 MISSING_DEPS=()
 
-for cmd in tmux notify-send mpv aplay uv; do
+for cmd in tmux notify-send mpv aplay uv gws; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         MISSING_DEPS+=("$cmd")
     fi
@@ -37,6 +37,11 @@ if [ ${#MISSING_DEPS[@]} -ne 0 ]; then
     if [[ " ${MISSING_DEPS[*]} " =~ " uv " ]]; then
         error "Elora requires 'uv' (Python package manager) to be installed."
         echo "Please install uv: https://github.com/astral-sh/uv"
+        exit 1
+    fi
+    if [[ " ${MISSING_DEPS[*]} " =~ " gws " ]]; then
+        error "Elora requires 'gws' (Google Workspace CLI) for Workspace integration."
+        echo "Please install gws: curl -sSL https://raw.githubusercontent.com/google/workspace-cli/main/scripts/install.sh | bash"
         exit 1
     fi
     echo "We highly recommend installing the missing system utilities using your package manager."
@@ -68,7 +73,7 @@ if command -v rsync >/dev/null 2>&1; then
         ./ "$INSTALL_DIR/"
 else
     # Fallback to standard copy if rsync isn't available
-    cp -r .gitignore .python-version pyproject.toml README.md assets elora main.py "$INSTALL_DIR/"
+    cp -r .gitignore .python-version pyproject.toml README.md assets docs elora main.py "$INSTALL_DIR/"
 fi
 
 # 4. Synchronize python environment
