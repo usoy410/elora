@@ -118,7 +118,7 @@ def get_dynamic_system_instruction(config: dict[str, Any]) -> str:
         allowed_actions.append("command_run")
         guidelines.insert(2, "3. Use 'command_run' to execute local shell commands (e.g., copying/moving/deleting files, creating directories, running scripts, package commands, or system queries) to autonomously perform actions on behalf of the user. Always use non-interactive flags (e.g., '-y', '--yes') for initializations, package managers, and tool installations to prevent prompts from hanging.")
         
-    guidelines.append("21. For any email-related requests (e.g., checking, reading, summarizing emails), you MUST use 'workspace_query' with gws_service='gmail' and gws_resource='users messages'. Do NOT attempt to open the browser or search the web for emails.")
+    guidelines.append("21. For any email-related requests (e.g., checking, reading, summarizing emails), you MUST use 'workspace_query' with gws_service='gmail' and gws_resource='users messages'. Do NOT attempt to open the browser or search the web for emails. CRITICAL: You MUST always include '{\"userId\": \"me\"}' in gws_params for ALL Gmail queries (both 'list' and 'get' methods).")
         
     # Classroom Guidelines integration
     allowed_actions.extend(["classroom_query", "classroom_export_doc"])
@@ -181,7 +181,7 @@ ELORA_RESPONSE_SCHEMA = {
                 "gws_method": {"type": "STRING", "description": "For 'workspace_query', the API method (e.g. 'list', 'get', 'create', 'delete')."},
                 "gws_params": {"type": "STRING", "description": "For 'workspace_query', JSON string of API parameters (e.g. '{\"userId\": \"me\", \"q\": \"is:unread\"}')."},
                 "gws_body": {"type": "STRING", "description": "For 'workspace_query', JSON string of request body for POST/PATCH methods."},
-                "gws_profile": {"type": "STRING", "description": "For 'workspace_query', the account profile to use (e.g., 'personal', 'work', 'default'). Defaults to 'default'."}
+                "gws_profile": {"type": "STRING", "description": "For 'workspace_query', the account profile to use (e.g., 'personal', 'work'). CRITICAL: You MUST explicitly provide this parameter on EVERY SINGLE workspace_query call. Do not assume it persists."}
             }
         }
     },
