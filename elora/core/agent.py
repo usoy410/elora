@@ -90,6 +90,16 @@ def run_agent_loop(
     
     Why: Equips Elora with autonomous problem solving and real-time research capabilities.
     """
+    # Pre-emptive Auto-Recall
+    try:
+        from elora.core.memory import search_memory, format_for_llm
+        mem_hits = search_memory(initial_prompt, limit=3, threshold=0.7)
+        if mem_hits:
+            mem_context = format_for_llm(mem_hits, header="Auto-Injected Context (from long-term memory):")
+            initial_prompt = f"{mem_context}\n\nUser Request: {initial_prompt}"
+    except Exception as e:
+        logger.debug(f"Auto-recall skipped/failed: {e}")
+
     current_prompt = initial_prompt
     loop_history = list(history)  # Shallow copy history to modify locally
     

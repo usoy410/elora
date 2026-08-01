@@ -281,6 +281,31 @@ def handle_client(conn: socket.socket):
                             
                     elif cmd == "query_brain":
                         text = payload.get("text", "")
+                        
+                        if text.startswith("/memory"):
+                            try:
+                                from elora.core.memory import _get_chroma_collection
+                                collection = _get_chroma_collection()
+                                items = collection.get()
+                                docs = items.get("documents", [])
+                                metas = items.get("metadatas", [])
+                                
+                                output = "🧠 **Elora Memory Dashboard**\n\n"
+                                if not docs:
+                                    output += "*No memories stored yet.*\n"
+                                else:
+                                    for doc, meta in zip(docs, metas):
+                                        topic = meta.get('topic', 'general')
+                                        date = meta.get('created_at', 'unknown')[:10]
+                                        output += f"- **[{topic.upper()}]** {doc} *(Stored: {date})*\n"
+                                
+                                output += "\n*To erase something, just say 'forget about [topic]'.*"
+                                
+                                conn.sendall((json.dumps({"type": "brain_response", "text": output}) + "\n").encode("utf-8"))
+                            except Exception as e:
+                                conn.sendall((json.dumps({"type": "brain_response", "text": f"Error accessing memory: {e}"}) + "\n").encode("utf-8"))
+                            continue
+                            
                         save_history = payload.get("save_history", True)
                         session_history = load_session_history(limit=20)
                         if save_history:
