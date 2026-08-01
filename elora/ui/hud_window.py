@@ -323,18 +323,18 @@ class EloraHUD(QWidget):
         lbl_cmd_desc.setWordWrap(True)
         self.tools_layout.addWidget(lbl_cmd_desc)
 
-        email_cfg = self.config.get("email", {"enabled": False})
+        workspace_cfg = skills_cfg.get("workspace_query", True)
 
-        self.chk_email = QCheckBox("Email reporting (IMAP)", self)
-        self.chk_email.setChecked(email_cfg.get("enabled", False))
-        self.chk_email.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.chk_email.clicked.connect(self.save_tools_config)
-        self.tools_layout.addWidget(self.chk_email)
+        self.chk_workspace = QCheckBox("Google Workspace (gws)", self)
+        self.chk_workspace.setChecked(workspace_cfg)
+        self.chk_workspace.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.chk_workspace.clicked.connect(self.save_tools_config)
+        self.tools_layout.addWidget(self.chk_workspace)
 
-        lbl_email_desc = QLabel("Let Elora check your configured IMAP inbox for unread or recent emails.", self)
-        lbl_email_desc.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 11px; padding-left: 24px;")
-        lbl_email_desc.setWordWrap(True)
-        self.tools_layout.addWidget(lbl_email_desc)
+        lbl_workspace_desc = QLabel("Let Elora query and manage your Gmail, Drive, Calendar, and Classroom.", self)
+        lbl_workspace_desc.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 11px; padding-left: 24px;")
+        lbl_workspace_desc.setWordWrap(True)
+        self.tools_layout.addWidget(lbl_workspace_desc)
 
         # Add Desktop Vision Explanation capability
         lbl_vision_header = QLabel("DESKTOP VISION CAPABILITIES", self)
@@ -373,10 +373,10 @@ class EloraHUD(QWidget):
         self.btn_sub_speech = QPushButton("Speech", self)
         self.btn_sub_brain = QPushButton("Brain", self)
         self.btn_sub_system = QPushButton("System", self)
-        self.btn_sub_email = QPushButton("Email", self)
+        self.btn_sub_workspace = QPushButton("Workspace", self)
         self.btn_sub_telegram = QPushButton("Telegram", self)
 
-        self.sub_buttons = [self.btn_sub_speech, self.btn_sub_brain, self.btn_sub_system, self.btn_sub_email, self.btn_sub_telegram]
+        self.sub_buttons = [self.btn_sub_speech, self.btn_sub_brain, self.btn_sub_system, self.btn_sub_workspace, self.btn_sub_telegram]
         for btn in self.sub_buttons:
             btn.setCheckable(True)
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -386,7 +386,7 @@ class EloraHUD(QWidget):
         self.btn_sub_speech.clicked.connect(lambda: self.switch_settings_subpage(0))
         self.btn_sub_brain.clicked.connect(lambda: self.switch_settings_subpage(1))
         self.btn_sub_system.clicked.connect(lambda: self.switch_settings_subpage(2))
-        self.btn_sub_email.clicked.connect(lambda: self.switch_settings_subpage(3))
+        self.btn_sub_workspace.clicked.connect(lambda: self.switch_settings_subpage(3))
         self.btn_sub_telegram.clicked.connect(lambda: self.switch_settings_subpage(4))
 
         self.settings_layout.addWidget(self.settings_nav)
@@ -636,52 +636,29 @@ class EloraHUD(QWidget):
         layout_system.addStretch()
         self.settings_stack.addWidget(self.subpage_system)
 
-        # ------------------- Sub-page 3: Email -------------------
-        self.subpage_email = QWidget(self)
-        layout_email = QVBoxLayout(self.subpage_email)
-        layout_email.setContentsMargins(0, 0, 0, 0)
-        layout_email.setSpacing(10)
+        # ------------------- Sub-page 3: Workspace -------------------
+        self.subpage_workspace = QWidget(self)
+        layout_workspace = QVBoxLayout(self.subpage_workspace)
+        layout_workspace.setContentsMargins(0, 0, 0, 0)
+        layout_workspace.setSpacing(10)
 
-        email_cfg = self.config.get("email", {})
-
-        lbl_email_addr = QLabel("EMAIL ADDRESS", self)
-        lbl_email_addr.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
-        layout_email.addWidget(lbl_email_addr)
+        lbl_workspace_info = QLabel("Google Workspace Integration", self)
+        lbl_workspace_info.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 12px; font-weight: bold; color: rgba(255,255,255,0.8);")
+        layout_workspace.addWidget(lbl_workspace_info)
         
-        self.txt_email_addr = QLineEdit(self)
-        self.txt_email_addr.setPlaceholderText("your-email@example.com")
-        self.txt_email_addr.setText(email_cfg.get("email_address", ""))
-        layout_email.addWidget(self.txt_email_addr)
+        lbl_workspace_details = QLabel(
+            "Elora uses the 'gws' CLI to securely access your Gmail, Drive, Calendar, and Classroom.\n\n"
+            "To re-authenticate or change credentials, run the interactive setup wizard:\n"
+            "  elora --setup\n\n"
+            "Your credentials are automatically bootstrapped to:\n"
+            "  ~/.config/elora/gws-personal/client_secret.json", self
+        )
+        lbl_workspace_details.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 11px;")
+        lbl_workspace_details.setWordWrap(True)
+        layout_workspace.addWidget(lbl_workspace_details)
 
-        lbl_imap_server = QLabel("IMAP SERVER", self)
-        lbl_imap_server.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
-        layout_email.addWidget(lbl_imap_server)
-        
-        self.txt_imap_server = QLineEdit(self)
-        self.txt_imap_server.setPlaceholderText("imap.gmail.com")
-        self.txt_imap_server.setText(email_cfg.get("imap_server", "imap.gmail.com"))
-        layout_email.addWidget(self.txt_imap_server)
-
-        lbl_imap_port = QLabel("IMAP PORT", self)
-        lbl_imap_port.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
-        layout_email.addWidget(lbl_imap_port)
-        
-        self.txt_imap_port = QLineEdit(self)
-        self.txt_imap_port.setPlaceholderText("993")
-        self.txt_imap_port.setText(str(email_cfg.get("imap_port", 993)))
-        layout_email.addWidget(self.txt_imap_port)
-
-        lbl_password_env = QLabel("PASSWORD ENV VARIABLE NAME", self)
-        lbl_password_env.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 9px; font-weight: bold; color: rgba(255,255,255,0.4);")
-        layout_email.addWidget(lbl_password_env)
-        
-        self.txt_password_env = QLineEdit(self)
-        self.txt_password_env.setPlaceholderText("ELORA_EMAIL_PASSWORD")
-        self.txt_password_env.setText(email_cfg.get("password_env_var", "ELORA_EMAIL_PASSWORD"))
-        layout_email.addWidget(self.txt_password_env)
-
-        layout_email.addStretch()
-        self.settings_stack.addWidget(self.subpage_email)
+        layout_workspace.addStretch()
+        self.settings_stack.addWidget(self.subpage_workspace)
 
         # ------------------- Sub-page 4: Telegram -------------------
         self.subpage_telegram = QWidget()
@@ -1040,10 +1017,8 @@ class EloraHUD(QWidget):
             "skills": {
                 "web_search": self.chk_web_search.isChecked(),
                 "web_scrape": self.chk_web_scrape.isChecked(),
-                "command_run": self.chk_command_run.isChecked()
-            },
-            "email": {
-                "enabled": self.chk_email.isChecked()
+                "command_run": self.chk_command_run.isChecked(),
+                "workspace_query": self.chk_workspace.isChecked()
             }
         }
         save_config(updates)
@@ -1110,17 +1085,6 @@ class EloraHUD(QWidget):
         hf_space_url = self.txt_hf_space_url.text().strip()
         hf_token = self.txt_hf_token.text().strip()
 
-        # Email configurations
-        email_addr = self.txt_email_addr.text().strip()
-        imap_server = self.txt_imap_server.text().strip()
-        imap_port_str = self.txt_imap_port.text().strip()
-        password_env = self.txt_password_env.text().strip() or "ELORA_EMAIL_PASSWORD"
-        
-        try:
-            imap_port = int(imap_port_str) if imap_port_str else 993
-        except ValueError:
-            imap_port = 993
-
         # Telegram configurations
         tg_enabled = self.chk_telegram.isChecked()
         tg_token_env = self.txt_tg_token_env.text().strip() or "TELEGRAM_BOT_TOKEN"
@@ -1166,12 +1130,6 @@ class EloraHUD(QWidget):
             "custom_personality": custom_personality,
             "gemini_api_key": api_key,
             "safe_gate_mode": self.chk_safe_gate.isChecked(),
-            "email": {
-                "email_address": email_addr,
-                "imap_server": imap_server,
-                "imap_port": imap_port,
-                "password_env_var": password_env
-            },
             "telegram": {
                 "enabled": tg_enabled,
                 "token_env_var": tg_token_env,
