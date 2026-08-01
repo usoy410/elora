@@ -3,22 +3,29 @@ Elora Google Classroom Integration Skill.
 Handles authentication, coursework/submission fetching, and Google Drive attachment parsing.
 """
 
-import os
-import json
-import logging
 import datetime
-from typing import Dict, Any, List, Optional
-from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import InstalledAppFlow
+import logging
+import os
+from typing import Any
+
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
 
 try:
     from elora.skills.workspace import (
-        is_gws_available, is_gws_authenticated,
-        list_active_courses, list_coursework, list_student_submissions,
-        get_coursework, get_drive_file_metadata, export_drive_file,
-        insert_calendar_event, get_calendar_event, update_calendar_event,
+        export_drive_file,
+        get_calendar_event,
+        get_coursework,
+        get_drive_file_metadata,
+        insert_calendar_event,
+        is_gws_authenticated,
+        is_gws_available,
+        list_active_courses,
+        list_coursework,
+        list_student_submissions,
+        update_calendar_event,
     )
     _GWS_IMPORTS_OK = True
 except ImportError:
@@ -45,7 +52,7 @@ SCOPES = [
 ]
 
 
-def get_classroom_credentials(allow_interactive: bool = True) -> Optional[Credentials]:
+def get_classroom_credentials(allow_interactive: bool = True) -> Credentials | None:
     """
     Retrieves OAuth 2.0 credentials from classroom_token.json or starts authentication
     flow using classroom_credentials.json if token is missing/expired.
@@ -108,7 +115,7 @@ def get_service(service_name: str, version: str, allow_interactive: bool = True)
     return build(service_name, version, credentials=creds)
 
 
-def parse_classroom_date(due_date_dict: Dict[str, int], due_time_dict: Optional[Dict[str, int]] = None) -> Optional[datetime.datetime]:
+def parse_classroom_date(due_date_dict: dict[str, int], due_time_dict: dict[str, int] | None = None) -> datetime.datetime | None:
     """
     Converts classroom API due date/time dictionaries into a datetime object.
     """
@@ -134,7 +141,7 @@ def parse_classroom_date(due_date_dict: Dict[str, int], due_time_dict: Optional[
         return None
 
 
-def fetch_classroom_data(mode: str = "list_pending", coursework_id: Optional[str] = None, course_id: Optional[str] = None) -> str:
+def fetch_classroom_data(mode: str = "list_pending", coursework_id: str | None = None, course_id: str | None = None) -> str:
     """
     Main entry point for retrieving Google Classroom assignment details.
     
@@ -445,10 +452,10 @@ def fetch_classroom_data(mode: str = "list_pending", coursework_id: Optional[str
 
     except Exception as e:
         logger.error("Failed to fetch Classroom data: %s", e)
-        return f"Error connecting to Google Classroom: {str(e)}"
+        return f"Error connecting to Google Classroom: {e!s}"
 
 
-def get_pending_assignments_raw() -> Optional[List[Dict[str, Any]]]:
+def get_pending_assignments_raw() -> list[dict[str, Any]] | None:
     """
     Fetches all pending assignments (not TURNED_IN or RETURNED) across active courses.
     Returns raw dictionaries containing assignment and course details, or None if connection failed.
@@ -607,7 +614,7 @@ def get_pending_assignments_raw() -> Optional[List[Dict[str, Any]]]:
         return None
 
 
-def sync_assignment_to_calendar(assignment: Dict[str, Any]) -> bool:
+def sync_assignment_to_calendar(assignment: dict[str, Any]) -> bool:
     """
     Syncs a single assignment to the user's primary Google Calendar as a 1-hour event ending at the due date.
     Uses a deterministic event ID to prevent duplicates.
@@ -743,10 +750,11 @@ def save_classroom_document(content: str, filename: str, file_format: str = "md"
             
     elif file_format == "pdf":
         try:
-            from reportlab.lib.pagesizes import letter
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
             import re
+
+            from reportlab.lib.pagesizes import letter
+            from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+            from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
             
             doc = SimpleDocTemplate(output_path, pagesize=letter, rightMargin=54, leftMargin=54, topMargin=54, bottomMargin=54)
             styles = getSampleStyleSheet()

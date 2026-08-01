@@ -5,9 +5,10 @@ Renders real-time animated equalizer bars responsive to core application states.
 
 import math
 import random
+
 from PySide6.QtCore import Qt, QTimer, Slot
+from PySide6.QtGui import QColor, QLinearGradient, QPainter
 from PySide6.QtWidgets import QWidget
-from PySide6.QtGui import QPainter, QColor, QLinearGradient
 
 
 class CavaVisualizer(QWidget):

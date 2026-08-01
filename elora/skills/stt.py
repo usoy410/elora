@@ -5,15 +5,13 @@ and energy-based silence detection. Saves captured audio to a local WAV file
 to be passed directly to the Gemini API.
 """
 
-import os
-import sys
-import time
 import logging
-import subprocess
-import wave
 import math
+import os
 import struct
-from typing import Optional
+import subprocess
+import time
+import wave
 
 logger = logging.getLogger("elora.stt")
 

@@ -3,12 +3,14 @@ Elora's AI reasoning engine (brain).
 Interactions with the Gemini API, enforcing strict JSON action structures.
 """
 
-import os
 import json
 import logging
-from typing import Dict, Any, List
+import os
+from typing import Any
+
 from google import genai
 from google.genai import types
+
 from elora.core.config import load_config
 
 logger = logging.getLogger("elora.brain")
@@ -54,7 +56,7 @@ PERSONALITIES = {
 }
 
 
-def get_dynamic_system_instruction(config: Dict[str, Any]) -> str:
+def get_dynamic_system_instruction(config: dict[str, Any]) -> str:
     """
     Builds the system instruction dynamically, tailoring active guidelines and
     the JSON schema to the user's enabled skills.
@@ -187,7 +189,7 @@ ELORA_RESPONSE_SCHEMA = {
 }
 
 
-def convert_history_to_gemini(history: List[Dict[str, str]]) -> List[types.Content]:
+def convert_history_to_gemini(history: list[dict[str, str]]) -> list[types.Content]:
     """Converts standard chat history format into Gemini client's Content format."""
     gemini_contents = []
     for msg in history:
@@ -268,7 +270,7 @@ def transcribe_audio(audio_path: str) -> str:
     return ""
 
 
-def query_elora(user_prompt: str, history: List[Dict[str, str]] = None) -> Dict[str, Any]:
+def query_elora(user_prompt: str, history: list[dict[str, str]] = None) -> dict[str, Any]:
     """
     Queries the Gemini API to get the structured JSON action block.
     Supports multimodal voice commands (WAV files) and screenshot context.

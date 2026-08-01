@@ -6,15 +6,15 @@ Supports self-healing device activation and playerctl DBus fallback for playback
 Prioritizes user's owned/saved playlists and Liked Songs before falling back to global search.
 """
 
+import difflib
+import json
 import logging
+import os
+import shutil
 import subprocess
 import time
-import os
-import json
+
 import requests
-from typing import Optional, Tuple
-import difflib
-import shutil
 
 logger = logging.getLogger("elora.spotify")
 
@@ -22,7 +22,7 @@ logger = logging.getLogger("elora.spotify")
 SPOTIFY_CLI = shutil.which("spotify-cli") or os.path.expanduser("~/.local/bin/spotify-cli")
 
 
-def run_spotify_cli(args: list) -> Tuple[bool, str]:
+def run_spotify_cli(args: list) -> tuple[bool, str]:
     """
     Runs the spotify-cli with given arguments.
     Returns (success, output_string).
@@ -118,7 +118,7 @@ def activate_first_device() -> bool:
     return switch_ok
 
 
-def get_spotify_access_token() -> Optional[str]:
+def get_spotify_access_token() -> str | None:
     """
     Reads the access token from credentials.json.
     Triggers an automatic refresh if the token is expired (returns 401 on test call).
@@ -194,7 +194,7 @@ def clean_spotify_query(query: str) -> str:
     return q.strip()
 
 
-def search_user_library(query: str, search_type: str) -> Optional[str]:
+def search_user_library(query: str, search_type: str) -> str | None:
     """
     Searches the user's owned/saved playlists and Liked Songs (saved tracks).
     Returns the URI of the matching item if found, otherwise None.
@@ -214,7 +214,7 @@ def search_user_library(query: str, search_type: str) -> Optional[str]:
     is_playlist_req = "playlist" in search_type or "playlist" in query.lower()
     
     # Helper to scan user's playlists
-    def check_playlists() -> Optional[str]:
+    def check_playlists() -> str | None:
         try:
             url = "https://api.spotify.com/v1/me/playlists?limit=50"
             r = requests.get(url, headers=headers, timeout=5)
@@ -249,7 +249,7 @@ def search_user_library(query: str, search_type: str) -> Optional[str]:
         return None
 
     # Helper to scan user's Liked Songs
-    def check_liked_songs() -> Optional[str]:
+    def check_liked_songs() -> str | None:
         try:
             url = "https://api.spotify.com/v1/me/tracks?limit=50"
             r = requests.get(url, headers=headers, timeout=5)
@@ -307,7 +307,7 @@ def search_user_library(query: str, search_type: str) -> Optional[str]:
     return None
 
 
-def search_spotify_uri_via_api(query: str, search_type: str = "--playlist") -> Optional[str]:
+def search_spotify_uri_via_api(query: str, search_type: str = "--playlist") -> str | None:
     """
     Searches Spotify via raw JSON API and returns the first result's URI.
     Does not require an active playback session.
@@ -399,7 +399,7 @@ def search_and_play_spotify(query: str) -> str:
     return play_spotify_uri(uri)
 
 
-def control_spotify(action: str, value: Optional[str] = None) -> str:
+def control_spotify(action: str, value: str | None = None) -> str:
     """
     Controls Spotify playback.
     Actions: play, pause, toggle (play-pause), next, previous, shuffle, volume, status.

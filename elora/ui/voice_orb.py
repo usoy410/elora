@@ -4,13 +4,13 @@ Loads transparent pre-processed video frames for fluid state animations,
 with a dynamic vector canvas fallback.
 """
 
-import os
-import math
 import logging
+import math
+import os
 
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QImage, QPainter, QRadialGradient
 from PySide6.QtWidgets import QWidget
-from PySide6.QtGui import QPainter, QColor, QRadialGradient, QImage
 
 from elora.utils import ensure_processed_video_frames
 

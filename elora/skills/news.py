@@ -3,9 +3,9 @@ Elora's news engine backend.
 Fetches tech RSS feeds, formats markdown summaries, and opens articles for deep-diving.
 """
 
-import subprocess
 import logging
-from typing import List, Dict
+import subprocess
+
 import feedparser
 
 logger = logging.getLogger("elora.news")
@@ -20,10 +20,10 @@ DEFAULT_FEEDS = [
 
 
 # Simple in-memory cache of the last fetched skim articles to support indexing for deep dive
-_article_cache: List[Dict[str, str]] = []
+_article_cache: list[dict[str, str]] = []
 
 
-def scrape_custom_blog(url: str, title_selector: str, link_selector: str, limit: int = 3) -> List[Dict[str, str]]:
+def scrape_custom_blog(url: str, title_selector: str, link_selector: str, limit: int = 3) -> list[dict[str, str]]:
     """
     Spawns a headless Playwright Chromium instance to load the page, render JS,
     and extract article titles and links based on CSS selectors.
@@ -67,7 +67,7 @@ def scrape_custom_blog(url: str, title_selector: str, link_selector: str, limit:
     return articles
 
 
-def fetch_tech_news(feed_urls: List[str] = None, limit_per_feed: int = None) -> List[Dict[str, str]]:
+def fetch_tech_news(feed_urls: list[str] = None, limit_per_feed: int = None) -> list[dict[str, str]]:
     """
     Fetches articles from RSS feeds and normalizes them into standard items.
     

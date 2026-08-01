@@ -5,8 +5,9 @@ Displays CPU, RAM, and Background Task usage using styled visual progress bars.
 
 import logging
 import subprocess
-from PySide6.QtCore import Qt, QTimer, Slot
-from PySide6.QtWidgets import QFrame, QVBoxLayout, QLabel, QProgressBar
+
+from PySide6.QtCore import QTimer, Slot
+from PySide6.QtWidgets import QFrame, QLabel, QProgressBar, QVBoxLayout
 
 logger = logging.getLogger("elora.ui.system_monitor")
 

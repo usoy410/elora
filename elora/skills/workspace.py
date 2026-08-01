@@ -12,7 +12,7 @@ import logging
 import os
 import shutil
 import subprocess
-from typing import Optional, Tuple, List, Dict, Any, Union
+from typing import Any
 
 logger = logging.getLogger('elora.skills.workspace')
 
@@ -64,12 +64,12 @@ def _run_gws(
     service: str, 
     resource: str, 
     method: str, 
-    params: Optional[Dict[str, Any]] = None, 
-    body: Optional[Dict[str, Any]] = None, 
-    sub_resource: Optional[str] = None, 
+    params: dict[str, Any] | None = None, 
+    body: dict[str, Any] | None = None, 
+    sub_resource: str | None = None, 
     page_all: bool = False,
     profile: str = "default"
-) -> Tuple[Union[Dict[str, Any], List[Any], None], Optional[str]]:
+) -> tuple[dict[str, Any] | list[Any] | None, str | None]:
     """Core wrapper. Returns (data, error_string). Runs subprocess with timeout=30s."""
     if not is_gws_available():
         return None, "Google Workspace CLI (gws) is not installed. Install it with: npm install -g @anthropic/workspace-cli"
@@ -158,15 +158,15 @@ def _run_gws(
     except Exception as e:
         return None, str(e)
 
-def list_active_courses() -> Tuple[Optional[List[Any]], Optional[str]]:
+def list_active_courses() -> tuple[list[Any] | None, str | None]:
     """Lists active courses (studentId=me)."""
     return _run_gws("classroom", "courses", "list", params={"studentId": "me", "courseStates": "ACTIVE"}, page_all=True)
 
-def list_coursework(course_id: str) -> Tuple[Optional[List[Any]], Optional[str]]:
+def list_coursework(course_id: str) -> tuple[list[Any] | None, str | None]:
     """Lists coursework for a course."""
     return _run_gws("classroom", "courses", "list", sub_resource="courseWork", params={"courseId": course_id}, page_all=True)
 
-def list_student_submissions(course_id: str, coursework_id: str = "-") -> Tuple[Optional[List[Any]], Optional[str]]:
+def list_student_submissions(course_id: str, coursework_id: str = "-") -> tuple[list[Any] | None, str | None]:
     """Lists student submissions."""
     return _run_gws(
         "classroom", "courses", "list", 
@@ -175,7 +175,7 @@ def list_student_submissions(course_id: str, coursework_id: str = "-") -> Tuple[
         page_all=True
     )
 
-def get_coursework(course_id: str, coursework_id: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def get_coursework(course_id: str, coursework_id: str) -> tuple[dict[str, Any] | None, str | None]:
     """Gets specific coursework."""
     return _run_gws(
         "classroom", "courses", "get", 
@@ -183,7 +183,7 @@ def get_coursework(course_id: str, coursework_id: str) -> Tuple[Optional[Dict[st
         params={"courseId": course_id, "id": coursework_id}
     )
 
-def export_drive_file(file_id: str, output_path: str, mime_type: str = "text/plain", profile: str = "default") -> Tuple[Optional[str], Optional[str]]:
+def export_drive_file(file_id: str, output_path: str, mime_type: str = "text/plain", profile: str = "default") -> tuple[str | None, str | None]:
     """Exports/downloads a Drive file."""
     if not is_gws_available():
         return None, "Google Workspace CLI (gws) is not installed. Install it with: npm install -g @anthropic/workspace-cli"
@@ -219,27 +219,27 @@ def export_drive_file(file_id: str, output_path: str, mime_type: str = "text/pla
     except Exception as e:
         return None, str(e)
 
-def get_drive_file_metadata(file_id: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def get_drive_file_metadata(file_id: str) -> tuple[dict[str, Any] | None, str | None]:
     """Gets Drive file metadata."""
     return _run_gws("drive", "files", "get", params={"fileId": file_id, "fields": "*"})
 
-def list_gmail_messages(query: str = "is:unread", max_results: int = 10) -> Tuple[Optional[List[Any]], Optional[str]]:
+def list_gmail_messages(query: str = "is:unread", max_results: int = 10) -> tuple[list[Any] | None, str | None]:
     """Lists Gmail messages."""
     return _run_gws("gmail", "users", "list", sub_resource="messages", params={"userId": "me", "q": query, "maxResults": max_results})
 
-def get_gmail_message(message_id: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def get_gmail_message(message_id: str) -> tuple[dict[str, Any] | None, str | None]:
     """Gets a single Gmail message with full content."""
     return _run_gws("gmail", "users", "get", sub_resource="messages", params={"userId": "me", "id": message_id, "format": "full"})
 
-def insert_calendar_event(event_body: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def insert_calendar_event(event_body: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
     """Creates a Calendar event."""
     return _run_gws("calendar", "events", "insert", params={"calendarId": "primary"}, body=event_body)
 
-def get_calendar_event(event_id: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def get_calendar_event(event_id: str) -> tuple[dict[str, Any] | None, str | None]:
     """Gets a Calendar event."""
     return _run_gws("calendar", "events", "get", params={"calendarId": "primary", "eventId": event_id})
 
-def update_calendar_event(event_id: str, event_body: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def update_calendar_event(event_id: str, event_body: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
     """Updates a Calendar event."""
     return _run_gws("calendar", "events", "update", params={"calendarId": "primary", "eventId": event_id}, body=event_body)
 

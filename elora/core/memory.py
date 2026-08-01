@@ -12,11 +12,11 @@ Design principles:
 - Topic tagging groups memories into browsable category nodes.
 """
 
+import logging
 import os
 import uuid
-import logging
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger("elora.memory")
 
@@ -38,18 +38,18 @@ _embed_model = None
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
-def is_memory_available() -> Tuple[bool, str]:
+def is_memory_available() -> tuple[bool, str]:
     """
     Checks if memory dependencies are installed on the system.
     Returns (True, "") or (False, "error message").
     """
     try:
         import chromadb
-        from sentence_transformers import SentenceTransformer
         import torch
+        from sentence_transformers import SentenceTransformer
         return True, ""
     except ImportError as e:
-        return False, f"Memory dependencies are missing: {str(e)}. Please run `uv sync` when your internet connection is stronger."
+        return False, f"Memory dependencies are missing: {e!s}. Please run `uv sync` when your internet connection is stronger."
 
 
 def _get_chroma_collection():
@@ -109,7 +109,7 @@ def _get_embed_model():
 
 
 
-def _embed(text: str) -> List[float]:
+def _embed(text: str) -> list[float]:
     """Embeds a piece of text into a fixed-length vector."""
     model = _get_embed_model()
     return model.encode(text, convert_to_numpy=True).tolist()
@@ -159,8 +159,8 @@ def search_memory(
     query: str,
     top_k: int = DEFAULT_TOP_K,
     threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
-    topic_filter: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    topic_filter: str | None = None,
+) -> list[dict[str, Any]]:
     """
     Performs an HNSW approximate nearest-neighbour search over stored memories.
 
@@ -183,7 +183,7 @@ def search_memory(
 
     query_embedding = _embed(query)
 
-    kwargs: Dict[str, Any] = {
+    kwargs: dict[str, Any] = {
         "query_embeddings": [query_embedding],
         "n_results": min(top_k, collection.count()),
         "include": ["documents", "metadatas", "distances"],
@@ -226,7 +226,7 @@ def search_memory(
     return hits
 
 
-def list_memory_topics() -> Dict[str, int]:
+def list_memory_topics() -> dict[str, int]:
     """
     Returns a dict mapping topic label → count of memories in that topic.
     Used for 'what have you remembered' queries.
@@ -236,7 +236,7 @@ def list_memory_topics() -> Dict[str, int]:
         return {}
 
     all_results = collection.get(include=["metadatas"])
-    topic_counts: Dict[str, int] = {}
+    topic_counts: dict[str, int] = {}
     for meta in all_results.get("metadatas", []):
         topic = meta.get("topic", "general")
         topic_counts[topic] = topic_counts.get(topic, 0) + 1
@@ -269,7 +269,7 @@ def delete_memories(query: str, threshold: float = 0.72) -> int:
     return len(ids_to_delete)
 
 
-def format_for_llm(hits: List[Dict[str, Any]], header: Optional[str] = None) -> str:
+def format_for_llm(hits: list[dict[str, Any]], header: str | None = None) -> str:
     """
     Formats retrieved memory nodes into a safe, clearly-labelled block for LLM injection.
 

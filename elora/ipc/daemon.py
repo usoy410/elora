@@ -16,17 +16,17 @@ def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
     return _orig_getaddrinfo(host, port, family, type, proto, flags)
 socket.getaddrinfo = _ipv4_only_getaddrinfo
 
-import os
-import sys
-import time
 import json
 import logging
-import threading
-import subprocess
-import wave
 import math
+import os
 import struct
-from typing import Optional, Dict, Any, List
+import subprocess
+import sys
+import threading
+import time
+import wave
+from typing import Any
 
 # Ensure package directory is on the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -58,7 +58,8 @@ logger = logging.getLogger("elora.daemon")
 
 SOCKET_PATH = "/tmp/elora.sock"
 from elora.core.config import load_session_history, save_session_history
-session_history: List[Dict[str, str]] = load_session_history(limit=20)
+
+session_history: list[dict[str, str]] = load_session_history(limit=20)
 # Active focus block — injected as context prefix when set; cleared on 'clear focus'
 active_focus: str = ""
 
@@ -194,7 +195,7 @@ class ActiveSTTThread(threading.Thread):
         finally:
             self.cleanup()
 
-    def _send(self, payload: Dict[str, Any]):
+    def _send(self, payload: dict[str, Any]):
         """Serialises and sends a JSON payload over the socket connection."""
         try:
             self.conn.sendall((json.dumps(payload) + "\n").encode("utf-8"))
@@ -220,7 +221,7 @@ class ActiveSTTThread(threading.Thread):
 def handle_client(conn: socket.socket):
     """Processes incoming IPC requests from client interfaces."""
     global session_history, active_focus
-    active_stt: Optional[ActiveSTTThread] = None
+    active_stt: ActiveSTTThread | None = None
     
     buffer = ""
     try:
@@ -303,7 +304,7 @@ def handle_client(conn: socket.socket):
                             except Exception as e:
                                 logger.error("Failed to send status update: %s", e)
 
-                        def confirm_cb(action: str, args: Dict[str, Any]) -> bool:
+                        def confirm_cb(action: str, args: dict[str, Any]) -> bool:
                             try:
                                 # Send confirmation request over the socket
                                 payload = {
@@ -474,7 +475,10 @@ def handle_client(conn: socket.socket):
                                 pass
                             
                             # 2. Match with registry
-                            from elora.skills.actions import _load_tasks_registry, _save_tasks_registry
+                            from elora.skills.actions import (
+                                _load_tasks_registry,
+                                _save_tasks_registry,
+                            )
                             registry = _load_tasks_registry()
                             
                             # Automatically sync tasks that ended while the daemon wasn't active
@@ -707,7 +711,10 @@ def handle_client(conn: socket.socket):
                                 # 2. No active running tasks, query user memory for name
                                 user_name = "boss"
                                 try:
-                                    from elora.core.memory import is_memory_available, search_memory
+                                    from elora.core.memory import (
+                                        is_memory_available,
+                                        search_memory,
+                                    )
                                     avail, _ = is_memory_available()
                                     if avail:
                                         results = search_memory("my name is", top_k=1, threshold=0.5)
@@ -726,8 +733,8 @@ def handle_client(conn: socket.socket):
                                 except Exception as e:
                                     logger.error("Failed to recall user name from memory: %s", e)
 
-                                from datetime import datetime
                                 import random
+                                from datetime import datetime
                                 hour = datetime.now().hour
                                 if hour < 12:
                                     time_of_day = "morning"
@@ -782,9 +789,13 @@ def classroom_scheduler_loop():
     # Wait for daemon startup to settle
     time.sleep(10)
     
-    from elora.skills.classroom import TOKEN_PATH, get_pending_assignments_raw, sync_assignment_to_calendar
-    from elora.utils import send_notification
+    from elora.skills.classroom import (
+        TOKEN_PATH,
+        get_pending_assignments_raw,
+        sync_assignment_to_calendar,
+    )
     from elora.skills.voice import speak_text
+    from elora.utils import send_notification
     
     CACHE_PATH = os.path.expanduser("~/.config/elora/classroom_cache.json")
     
@@ -928,7 +939,7 @@ def classroom_scheduler_loop():
             # Deliver unified report for new assignments if any are found
             if new_assignments:
                 # Helper functions for formatting assignment details
-                def get_work_type_friendly(wt: Optional[str]) -> str:
+                def get_work_type_friendly(wt: str | None) -> str:
                     if not wt:
                         return "Assignment"
                     wt_upper = wt.upper()
@@ -938,7 +949,7 @@ def classroom_scheduler_loop():
                         return "Assignment"
                     return wt_upper.replace("_", " ").title()
 
-                def format_due_date(dt: Optional[datetime.datetime]) -> str:
+                def format_due_date(dt: datetime.datetime | None) -> str:
                     if not dt:
                         return "No due date"
                     return dt.strftime("%b %d, %I:%M %p")
@@ -1019,13 +1030,14 @@ def email_scheduler_loop():
     Background loop that polls the user's email inbox for new unread emails.
     Triggers desktop notifications and speaks the details when new emails arrive.
     """
-    import datetime
-    import imaplib
     import email
     import email.utils
+    import imaplib
     import json
-    from elora.core.config import load_config
+
     from elora.skills.email import decode_mime_header, load_env_credential
+
+    from elora.core.config import load_config
     from elora.utils import send_notification
 
     logger.info("Email background scheduler thread started.")

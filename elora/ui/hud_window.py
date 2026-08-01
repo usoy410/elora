@@ -3,36 +3,51 @@ Main HUD Window Controller for Elora using PySide6.
 Coordinates user input event-filtering, sidebar logs, settings, and telemetry panels.
 """
 
-import sys
-import os
 import json
 import logging
+import os
 import subprocess
-from typing import Optional, Dict, Any
+import sys
 
-from PySide6.QtCore import Qt, Signal, Slot, QTimer, QPoint, QRectF, QEvent
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal, Slot
+from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QGraphicsDropShadowEffect, QTextBrowser, QListWidget, QListWidgetItem,
-    QPushButton, QStackedWidget, QComboBox, QSlider, QTextEdit, QCheckBox,
-    QFrame, QLineEdit
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QSlider,
+    QStackedWidget,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtGui import QPainter, QColor, QRadialGradient, QFont, QIcon
 
 # Import from core modules
 from elora.core.config import load_config, save_config
+from elora.ui.cava_visualizer import CavaVisualizer
 
 # Import local ui packages
-from elora.ui.styles import HUD_STYLESHEET, MODAL_OVERLAY_STYLE, MODAL_CARD_STYLE
+from elora.ui.styles import HUD_STYLESHEET
+from elora.ui.system_monitor import SystemMonitorWidget
 from elora.ui.threads import (
-    DaemonSTTThread, DaemonQueryThread, NewsFetchThread,
-    TaskListFetchThread, TaskLogFetchThread, TaskCancelThread,
-    TaskRemoveThread, ScreenExplanationThread, StartupGreetingThread
+    DaemonQueryThread,
+    DaemonSTTThread,
+    NewsFetchThread,
+    ScreenExplanationThread,
+    StartupGreetingThread,
+    TaskCancelThread,
+    TaskListFetchThread,
+    TaskLogFetchThread,
+    TaskRemoveThread,
 )
 from elora.ui.voice_orb import OrbWidget
-from elora.ui.hud_overlay import EloraModalOverlay
-from elora.ui.system_monitor import SystemMonitorWidget
-from elora.ui.cava_visualizer import CavaVisualizer
 
 logger = logging.getLogger("elora.ui.hud_window")
 
@@ -65,7 +80,7 @@ class EloraHUD(QWidget):
         self.greeting_played = False
         self.is_processing_user_input = False
         self.session_history = []
-        self.record_process: Optional[subprocess.Popen] = None
+        self.record_process: subprocess.Popen | None = None
         self.is_recording = False
         self.active_sidebar_tab = -1  # -1 = closed
         self.task_list_thread = None
@@ -917,7 +932,6 @@ class EloraHUD(QWidget):
 
     def update_browser_screenshot(self):
         from PySide6.QtGui import QPixmap
-        import os
         screenshot_path = "/tmp/elora_browser.png"
         if os.path.exists(screenshot_path):
             pixmap = QPixmap(screenshot_path)
@@ -1289,6 +1303,7 @@ class EloraHUD(QWidget):
         # Play alert chime to notify the user that they can speak
         try:
             import os
+
             from elora.utils import play_chime
             # Resolve absolute path to the success-chime.mp3 asset
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1456,11 +1471,11 @@ class EloraHUD(QWidget):
                 )
             else:
                 self.console_output.append(
-                    f"<span style='margin-left: 12px; color: rgba(255,255,255,0.3); font-size: 11px;'>✔️ Tool execution completed.</span>"
+                    "<span style='margin-left: 12px; color: rgba(255,255,255,0.3); font-size: 11px;'>✔️ Tool execution completed.</span>"
                 )
         elif etype == "confirm_request":
             self.console_output.append(
-                f"<span style='color: #F87171; font-weight: bold;'>⚠️ Safety Gate: Waiting for user confirmation...</span>"
+                "<span style='color: #F87171; font-weight: bold;'>⚠️ Safety Gate: Waiting for user confirmation...</span>"
             )
 
     @Slot(str, dict)
@@ -1492,11 +1507,11 @@ class EloraHUD(QWidget):
         
         if approved:
             self.console_output.append(
-                f"<span style='color: #34D399; font-weight: bold;'>✔️ Command execution approved by user.</span>"
+                "<span style='color: #34D399; font-weight: bold;'>✔️ Command execution approved by user.</span>"
             )
         else:
             self.console_output.append(
-                f"<span style='color: #F87171; font-weight: bold;'>❌ Command execution denied by user.</span>"
+                "<span style='color: #F87171; font-weight: bold;'>❌ Command execution denied by user.</span>"
             )
             
         if self.query_thread:
@@ -1706,7 +1721,7 @@ class EloraHUD(QWidget):
     def on_news_clicked(self, item: QListWidgetItem):
         link = item.data(Qt.ItemDataRole.UserRole)
         if link:
-            self.console_output.append(f"<span style='color: #10B981;'>System:</span> Opening link in web browser...")
+            self.console_output.append("<span style='color: #10B981;'>System:</span> Opening link in web browser...")
             from elora.skills.actions import open_browser_url
             open_browser_url(link)
 
@@ -2226,7 +2241,7 @@ def prevent_multiple_instances() -> bool:
         _hud_lock_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         _hud_lock_socket.bind('\0elora_hud_instance_lock')
         return True
-    except socket.error:
+    except OSError:
         return False
 
 

@@ -4,10 +4,10 @@ Loads and saves configuration parameters from ~/.config/elora/config.json.
 Provides fallbacks if the configuration is missing or corrupted.
 """
 
-import os
 import json
 import logging
-from typing import Dict, Any
+import os
+from typing import Any
 
 logger = logging.getLogger("elora.config")
 
@@ -15,7 +15,7 @@ logger = logging.getLogger("elora.config")
 CONFIG_DIR = os.path.expanduser("~/.config/elora")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 
-DEFAULT_SETTINGS: Dict[str, Any] = {
+DEFAULT_SETTINGS: dict[str, Any] = {
     "model_name": "gemini-2.5-flash",
     "gemini_api_key": "",
     "news": {
@@ -69,7 +69,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
 }
 
 
-def load_config() -> Dict[str, Any]:
+def load_config() -> dict[str, Any]:
     """
     Loads configuration settings from ~/.config/elora/config.json.
     Creates default configuration file if it does not exist.
@@ -124,7 +124,7 @@ def load_config() -> Dict[str, Any]:
         return fallback
 
 
-_override_config: Dict[str, Any] = {}
+_override_config: dict[str, Any] = {}
 
 
 def set_config_override(key: str, value: Any) -> None:
@@ -133,7 +133,7 @@ def set_config_override(key: str, value: Any) -> None:
     _override_config[key] = value
 
 
-def save_config(config_updates: Dict[str, Any]) -> None:
+def save_config(config_updates: dict[str, Any]) -> None:
     """
     Saves configuration updates to ~/.config/elora/config.json.
     Merges updates into the actual file on disk, avoiding dynamically overridden session keys.

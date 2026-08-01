@@ -3,14 +3,15 @@ Elora's action execution module.
 Manages spawning background agent tasks in tmux and launching system browsers.
 """
 
-import os
-import subprocess
-import shlex
+import json
 import logging
+import os
+import shlex
+import subprocess
 import threading
 import time
-import json
-from elora.utils import send_notification, play_chime
+
+from elora.utils import play_chime, send_notification
 
 logger = logging.getLogger("elora.actions")
 
@@ -256,8 +257,8 @@ def execute_agent_task(prompt: str) -> str:
         os.makedirs(project_dir, exist_ok=True)
         
     # Load configuration settings for background agent delegation
+
     from elora.core.config import load_config
-    import shutil
     config = load_config()
     agent_cfg = config.get("background_agent", {})
     active_provider = agent_cfg.get("active_provider", "agy")

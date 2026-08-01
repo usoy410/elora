@@ -5,9 +5,10 @@ Provides DuckDuckGo search, BeautifulSoup text scraping, and command execution.
 
 import logging
 import os
-import subprocess
-import requests
 import re
+import subprocess
+
+import requests
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger("elora.skills")
@@ -44,7 +45,7 @@ def search_duckduckgo(query: str) -> str:
             # Clean up redundant redirection links in DDG urls if present
             if link.startswith("//duckduckgo.com/l/?kh=-1&uddg="):
                 # Extract actual target link from parameter
-                from urllib.parse import urlparse, parse_qs
+                from urllib.parse import parse_qs, urlparse
                 parsed = urlparse(link)
                 params = parse_qs(parsed.query)
                 if "uddg" in params:
@@ -58,7 +59,7 @@ def search_duckduckgo(query: str) -> str:
         return "\n".join(results)
     except Exception as e:
         logger.error("DuckDuckGo search failed: %s", e)
-        return f"Error executing DuckDuckGo search: {str(e)}"
+        return f"Error executing DuckDuckGo search: {e!s}"
 
 
 def scrape_webpage(url: str) -> str:
@@ -98,7 +99,7 @@ def scrape_webpage(url: str) -> str:
         return cleaned_text
     except Exception as e:
         logger.error("Web scraping failed: %s", e)
-        return f"Error scraping page text: {str(e)}"
+        return f"Error scraping page text: {e!s}"
 
 
 def adapt_package_manager_commands(command: str) -> str:
@@ -250,4 +251,4 @@ def run_local_command(command: str) -> str:
         return f"Error (exit code {e.returncode}):\n{cleaned_err}"
     except Exception as e:
         logger.error("Command execution failed: %s", e)
-        return f"Failed to execute command: {str(e)}"
+        return f"Failed to execute command: {e!s}"

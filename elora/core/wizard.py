@@ -4,11 +4,9 @@ Guides the user through setting up API keys, Spotify CLI, and Google Classroom c
 """
 
 import os
-import sys
 import shutil
 import subprocess
-import json
-from typing import Dict, Any
+
 from elora.core.config import load_config, save_config
 
 # Terminal colors for guided UX
@@ -184,8 +182,8 @@ def run_setup_wizard():
         
         if is_installed:
             print(f"\n{GREEN}✓ spotify-cli is installed.{RESET}")
-            print(f"To authenticate, a browser window will open. You will need to log in to Spotify,")
-            print(f"authorize the application, and paste the redirected URL or token back into the terminal.")
+            print("To authenticate, a browser window will open. You will need to log in to Spotify,")
+            print("authorize the application, and paste the redirected URL or token back into the terminal.")
             
             if ask_yes_no("Would you like to authenticate spotify-cli now?", default=True):
                 print(f"\n{BLUE}Launching spotify-cli authentication...{RESET}")
@@ -275,7 +273,7 @@ def run_setup_wizard():
             
         if selected_provider == "custom":
             existing_custom = providers.get("custom", "")
-            print(f"\nEnter custom command template (must contain '{{prompt}}' where the task text should be injected).")
+            print("\nEnter custom command template (must contain '{prompt}' where the task text should be injected).")
             new_template = input(f"Custom template [{existing_custom or 'none'}]: ").strip()
             if new_template:
                 providers["custom"] = new_template

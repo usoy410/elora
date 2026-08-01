@@ -3,9 +3,9 @@ Elora OS-Level Mouse & Keyboard Input Control.
 Uses PyAutoGUI / xdotool and listens globally for the Ctrl+Alt+C abort hotkey.
 """
 
-import time
 import logging
 import threading
+import time
 
 logger = logging.getLogger("elora.os_control")
 
@@ -162,15 +162,23 @@ def capture_desktop_screenshot(output_path: str = "/tmp/elora_screenshot.png") -
     10. scrot CLI tool (X11).
     11. PyAutoGUI screenshot capture fallback.
     """
-    import subprocess
     import os
+    import subprocess
     
     # 1. Try XDG Desktop Portal (robust modern Wayland & X11 standard)
     try:
-        import sys
-        from PySide6.QtCore import QCoreApplication, QEventLoop, QObject, Slot, QTimer, SLOT
-        from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusMessage
         import shutil
+        import sys
+
+        from PySide6.QtCore import (
+            SLOT,
+            QCoreApplication,
+            QEventLoop,
+            QObject,
+            QTimer,
+            Slot,
+        )
+        from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusMessage
 
         class PortalHelper(QObject):
             def __init__(self, out_path, loop):

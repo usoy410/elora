@@ -15,11 +15,11 @@ def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
     return _orig_getaddrinfo(host, port, family, type, proto, flags)
 socket.getaddrinfo = _ipv4_only_getaddrinfo
 
-import sys
-import os
 import json
 import logging
-from typing import List, Dict, Any
+import os
+import sys
+from typing import Any
 
 # Set logger configuration
 logging.basicConfig(level=logging.WARNING)
@@ -28,7 +28,7 @@ logger = logging.getLogger("elora.main")
 from elora.core.config import load_session_history, save_session_history
 
 # Store a short message history to maintain context during interactive sessions
-session_history: List[Dict[str, str]] = load_session_history(limit=20)
+session_history: list[dict[str, str]] = load_session_history(limit=20)
 
 
 def add_to_history(role: str, content: str) -> None:
@@ -43,7 +43,7 @@ def add_to_history(role: str, content: str) -> None:
 
 
 
-def process_action(payload: Dict[str, any]) -> None:
+def process_action(payload: dict[str, any]) -> None:
     """
     Routes the structured action JSON to the corresponding local execution script.
     
@@ -253,10 +253,11 @@ def start_voice_assistant_loop() -> None:
     Runs a hands-free conversational voice assistant loop.
     Repeatedly listens for voice input, executes prompt, and speaks response.
     """
-    from elora.skills.stt import listen_voice
-    from elora.core.config import set_config_override
-    from elora.utils import play_chime
     import os
+
+    from elora.core.config import set_config_override
+    from elora.skills.stt import listen_voice
+    from elora.utils import play_chime
     
     chime_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "sounds", "success-chime.mp3")
     
@@ -273,9 +274,10 @@ def start_voice_assistant_loop() -> None:
     # Dynamic startup greeting
     print("Elora: Standing by...")
     try:
-        from elora.skills.voice import speak_text
-        from datetime import datetime
         import random
+        from datetime import datetime
+
+        from elora.skills.voice import speak_text
         
         hour = datetime.now().hour
         if hour < 12:

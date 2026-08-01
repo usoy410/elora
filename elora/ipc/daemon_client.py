@@ -3,12 +3,13 @@ Elora Daemon IPC Client.
 Exposes standard methods for front-end HUD windows to communicate with the background daemon.
 """
 
-import socket
 import json
-import os
-import threading
 import logging
-from typing import Dict, Any, Callable
+import os
+import socket
+import threading
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger("elora.daemon_client")
 SOCKET_PATH = "/tmp/elora.sock"
@@ -57,7 +58,7 @@ class EloraDaemonClient:
                 pass
             self.sock = None
 
-    def send_cmd(self, cmd_dict: Dict[str, Any]) -> Dict[str, Any]:
+    def send_cmd(self, cmd_dict: dict[str, Any]) -> dict[str, Any]:
         """Sends a command to the daemon and returns the single response object."""
         # Always connect/reconnect on standard commands to ensure connection is fresh
         if not self.connect():
@@ -79,7 +80,7 @@ class EloraDaemonClient:
         finally:
             self.close()
 
-    def start_voice_listening(self, callback: Callable[[Dict[str, Any]], None], silence_detection: bool = True):
+    def start_voice_listening(self, callback: Callable[[dict[str, Any]], None], silence_detection: bool = True):
         """Initiates recording stream on the daemon and routes real-time transcriptions to callback."""
         if not self.connect():
             callback({"status": "error", "message": "Elora background daemon is not running."})
@@ -123,6 +124,6 @@ class EloraDaemonClient:
             except Exception as e:
                 logger.error("Failed to send stop command: %s", e)
 
-    def explain_screen(self) -> Dict[str, Any]:
+    def explain_screen(self) -> dict[str, Any]:
         """Tells the daemon to capture and explain the screen contents, returning the explanation."""
         return self.send_cmd({"cmd": "explain_screen"})

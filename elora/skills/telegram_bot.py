@@ -26,10 +26,10 @@ import json
 import logging
 import os
 import tempfile
-import time
 import zipfile
 from typing import Any
 
+from elora.skills.email import load_env_credential
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import (
@@ -42,11 +42,9 @@ from telegram.ext import (
 
 from elora.core.agent import run_agent_loop
 from elora.core.config import load_config, load_session_history, save_session_history
-from elora.skills.email import load_env_credential
-from elora.skills.actions import execute_agent_task, _load_tasks_registry
-from elora.skills.os_control import capture_desktop_screenshot
-from elora.core.brain import transcribe_audio
+from elora.skills.actions import _load_tasks_registry, execute_agent_task
 from elora.skills.news import get_news_summary
+from elora.skills.os_control import capture_desktop_screenshot
 
 logger = logging.getLogger("elora.telegram")
 
@@ -350,8 +348,6 @@ def _sync_process_prompt(prompt: str) -> tuple[dict, bool]:
         A tuple of (result_dict, screenshot_modified) where screenshot_modified
         indicates the agent captured a new screenshot during execution.
     """
-    from elora.core.agent import run_agent_loop
-    from elora.core.config import load_session_history, save_session_history
     from elora.skills.os_control import capture_desktop_screenshot
 
     # Track screenshot modification time to detect agent-initiated captures
@@ -465,8 +461,6 @@ async def _process_prompt_async(prompt: str, update: Update, context: ContextTyp
     Why: Shared logic for text messages and transcribed voice messages.
     Routes agent results to appropriate Telegram responses.
     """
-    from elora.skills.actions import execute_agent_task
-    from elora.skills.news import get_news_summary
 
     await update.message.reply_chat_action(ChatAction.TYPING)
 
@@ -623,7 +617,6 @@ def start_telegram_bot() -> None:
     long-polling against the Telegram Bot API.
     """
     from elora.core.config import load_config
-    from elora.skills.email import load_env_credential
 
     config = load_config()
     telegram_cfg = config.get("telegram", {})
@@ -638,7 +631,7 @@ def start_telegram_bot() -> None:
     token = load_env_credential(token_env_var)
 
     if not token:
-        print(f"\nElora: Telegram bot token not found.")
+        print("\nElora: Telegram bot token not found.")
         print(f"       Set {token_env_var}=your_token in ~/.env\n")
         return
 

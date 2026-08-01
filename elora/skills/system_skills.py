@@ -3,10 +3,10 @@ Elora System Skills.
 Provides controls for volume, brightness, active window states, and app launching on Linux.
 """
 
-import os
-import subprocess
 import logging
+import os
 import shlex
+import subprocess
 
 logger = logging.getLogger("elora.system_skills")
 

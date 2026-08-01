@@ -5,25 +5,39 @@ Manages multi-turn query loops, tool execution, and history updates.
 
 import logging
 import os
-from typing import Dict, Any, List, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from elora.core.brain import query_elora
-from elora.skills.skills import search_duckduckgo, scrape_webpage, run_local_command
-from elora.skills.classroom import fetch_classroom_data, save_classroom_document
-from elora.skills.workspace import run_workspace_query
-from elora.skills.browser_control import execute_browser_action
-from elora.skills.os_control import move_mouse_smoothly, click_mouse_at, type_keyboard_text
-from elora.skills.system_skills import set_system_volume, set_system_brightness, perform_window_action, launch_application
-from elora.skills.spotify import control_spotify, play_spotify_uri, search_and_play_spotify
 from elora.core.memory import (
-    store_memory,
-    search_memory,
-    list_memory_topics,
+    clear_all_memories,
     delete_memories,
     format_for_llm,
     is_memory_available,
-    clear_all_memories,
+    list_memory_topics,
+    search_memory,
+    store_memory,
 )
+from elora.skills.browser_control import execute_browser_action
+from elora.skills.classroom import fetch_classroom_data, save_classroom_document
+from elora.skills.os_control import (
+    click_mouse_at,
+    move_mouse_smoothly,
+    type_keyboard_text,
+)
+from elora.skills.skills import run_local_command, scrape_webpage, search_duckduckgo
+from elora.skills.spotify import (
+    control_spotify,
+    play_spotify_uri,
+    search_and_play_spotify,
+)
+from elora.skills.system_skills import (
+    launch_application,
+    perform_window_action,
+    set_system_brightness,
+    set_system_volume,
+)
+from elora.skills.workspace import run_workspace_query
 
 logger = logging.getLogger("elora.agent")
 
@@ -64,11 +78,11 @@ def is_visual_query(prompt: str) -> bool:
 
 def run_agent_loop(
     initial_prompt: str,
-    history: List[Dict[str, str]],
-    status_callback: Optional[Callable[[Any], None]] = None,
-    confirm_callback: Optional[Callable[[str, Dict[str, Any]], bool]] = None,
-    screenshot_callback: Optional[Callable[[], bool]] = None
-) -> Dict[str, Any]:
+    history: list[dict[str, str]],
+    status_callback: Callable[[Any], None] | None = None,
+    confirm_callback: Callable[[str, dict[str, Any]], bool] | None = None,
+    screenshot_callback: Callable[[], bool] | None = None
+) -> dict[str, Any]:
     """
     Executes the multi-turn ReAct reasoning loop.
     Runs up to 5 steps, executing intermediate skills (search, scrape, shell command)
@@ -422,7 +436,7 @@ def run_agent_loop(
                 "output": res
             })
             loop_history.append({"role": "user", "content": f"System Tool Output (desktop_input: {itype}): {res}"})
-            current_prompt = f"Analyze desktop input outcome and determine next action."
+            current_prompt = "Analyze desktop input outcome and determine next action."
  
         elif action == "system_control":
             ctype = args.get("control_type", "")
@@ -450,7 +464,7 @@ def run_agent_loop(
                 "output": res
             })
             loop_history.append({"role": "user", "content": f"System Tool Output (system_control: {ctype}): {res}"})
-            current_prompt = f"Analyze system control adjustment outcome and determine next action."
+            current_prompt = "Analyze system control adjustment outcome and determine next action."
             
         elif action == "spotify_control":
             spotify_action = args.get("param", "")
@@ -477,8 +491,9 @@ def run_agent_loop(
             spoke_this_turn = False
             if announcement and spotify_action in ("play", "play_uri", "search_play"):
                 try:
-                    from elora.skills.voice import speak_text, is_speaking
                     import time
+
+                    from elora.skills.voice import is_speaking, speak_text
                     
                     # Print announcement so CLI users see it
                     print(f"\nElora: {announcement}\n")
@@ -636,7 +651,7 @@ def _handle_memory_store(args: dict) -> dict:
     except Exception as e:
         return {
             "action": "reply",
-            "arguments": {"message": f"Error storing memory: {str(e)}"}
+            "arguments": {"message": f"Error storing memory: {e!s}"}
         }
 
 
@@ -692,7 +707,7 @@ def _handle_memory_recall(args: dict) -> dict:
     except Exception as e:
         return {
             "action": "reply",
-            "arguments": {"message": f"Error recalling memory: {str(e)}"}
+            "arguments": {"message": f"Error recalling memory: {e!s}"}
         }
 
 
@@ -740,7 +755,7 @@ def _handle_memory_focus(args: dict) -> dict:
     except Exception as e:
         return {
             "action": "reply",
-            "arguments": {"message": f"Error focusing memory: {str(e)}"}
+            "arguments": {"message": f"Error focusing memory: {e!s}"}
         }
 
 
@@ -792,7 +807,7 @@ def _handle_memory_forget(args: dict) -> dict:
     except Exception as e:
         return {
             "action": "reply",
-            "arguments": {"message": f"Error forgetting memory: {str(e)}"}
+            "arguments": {"message": f"Error forgetting memory: {e!s}"}
         }
 
 

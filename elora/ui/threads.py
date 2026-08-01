@@ -5,6 +5,7 @@ Uses QThread to prevent freezing the PySide6 UI event loop.
 
 import json
 import logging
+
 from PySide6.QtCore import QThread, Signal
 
 logger = logging.getLogger("elora.ui.threads")

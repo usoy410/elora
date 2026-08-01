@@ -3,13 +3,13 @@ Elora Brave Browser Control Engine.
 Integrates Playwright CDP (Chrome DevTools Protocol) to automate Brave.
 """
 
-import os
-import time
 import logging
+import os
 import socket
 import subprocess
-from typing import Optional, List, Dict, Any
-from playwright.sync_api import sync_playwright, Page, BrowserContext, Browser
+import time
+
+from playwright.sync_api import Page, sync_playwright
 
 logger = logging.getLogger("elora.browser")
 
@@ -145,7 +145,7 @@ def execute_browser_action(action_name: str, **kwargs) -> str:
             return result
     except Exception as e:
         logger.error("Browser action '%s' failed: %s", action_name, e)
-        return f"Error executing browser action '{action_name}': {str(e)}"
+        return f"Error executing browser action '{action_name}': {e!s}"
 
 
 def _perform_click(page: Page, selector: str) -> str:
@@ -200,7 +200,7 @@ def _perform_type(page: Page, selector: str, text: str) -> str:
         f"textarea[placeholder*='{selector}' i]",
         f"[aria-label*='{selector}' i]",
         f"input[name='{selector}']",
-        f"input[type='text']"
+        "input[type='text']"
     ]
     
     for sel in input_selectors:

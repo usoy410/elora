@@ -4,15 +4,15 @@ Replaces local kokoro-onnx with Gemini API native voice synthesis,
 with a robust fallback to local kokoro-onnx if API limits/errors are encountered.
 """
 
-import os
-import sys
 import logging
-import subprocess
-import wave
-import urllib.request
-import soundfile as sf
-from typing import Optional
+import os
 import re
+import subprocess
+import sys
+import urllib.request
+import wave
+
+import soundfile as sf
 
 from elora.core.config import load_config
 from elora.utils import play_chime
@@ -21,7 +21,7 @@ logger = logging.getLogger("elora.voice")
 
 MODELS_DIR = os.path.expanduser("~/.config/elora/models")
 TEMP_SPEECH_PATH = os.path.expanduser("~/.config/elora/speech.wav")
-_active_playback_process: Optional[subprocess.Popen] = None
+_active_playback_process: subprocess.Popen | None = None
 
 _original_volumes = {}
 _is_ducked = False
@@ -82,7 +82,7 @@ def unduck_media():
     _is_ducked = False
 
 
-def _play_speech_and_monitor(proc: Optional[subprocess.Popen]) -> None:
+def _play_speech_and_monitor(proc: subprocess.Popen | None) -> None:
     """Sets the active speech process and monitors it to restore media volume on exit."""
     global _active_playback_process
     _active_playback_process = proc
@@ -100,7 +100,7 @@ MODEL_INT8_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/
 VOICES_BIN_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
 
 # Cached global Kokoro client to avoid repeating costly initialization operations
-_kokoro_client: Optional[object] = None
+_kokoro_client: object | None = None
 
 
 def _download_progress(count: int, block_size: int, total_size: int) -> None:
@@ -144,7 +144,7 @@ def download_voice_assets() -> tuple[str, str]:
     return model_path, voices_path
 
 
-def _get_kokoro_client() -> Optional[object]:
+def _get_kokoro_client() -> object | None:
     """
     Initializes and returns the cached Kokoro client (lazy loaded).
     """
@@ -165,7 +165,7 @@ def _get_kokoro_client() -> Optional[object]:
         return None
 
 
-def warmup_cloud_tts(space_url: str, token: Optional[str] = None) -> None:
+def warmup_cloud_tts(space_url: str, token: str | None = None) -> None:
     """
     Warms up a Hugging Face Space by triggering a GET request to wake it up.
     
@@ -173,8 +173,9 @@ def warmup_cloud_tts(space_url: str, token: Optional[str] = None) -> None:
     Calling them on daemon startup ensures they start booting up early to minimize 
     first-use cold start latency.
     """
-    import requests
     import time
+
+    import requests
 
     base_url = space_url.rstrip('/')
     if "/gradio_api" not in base_url:
@@ -282,7 +283,7 @@ def save_audio_payload(audio_data: bytes, mime_type: str, output_path: str) -> s
         return file_path
 
 
-def _get_git_hf_token(space_url: str) -> Optional[str]:
+def _get_git_hf_token(space_url: str) -> str | None:
     """
     Tries to retrieve the Hugging Face token from Git credentials helper.
     
@@ -307,15 +308,16 @@ def _get_git_hf_token(space_url: str) -> Optional[str]:
     return None
 
 
-def synthesize_cloud_speech(text: str, space_url: str, voice_name: str, speed: float, token: Optional[str] = None) -> Optional[str]:
+def synthesize_cloud_speech(text: str, space_url: str, voice_name: str, speed: float, token: str | None = None) -> str | None:
     """
     Sends a request to the Gradio space API to synthesize text via Kokoro.
     Returns path to the downloaded audio file if successful, otherwise None.
     
     Why: Offloads heavy audio processing logic to a Hugging Face Space, preserving local CPU resources.
     """
-    import requests
     import json
+
+    import requests
 
     base_url = space_url.rstrip('/')
     
@@ -403,7 +405,7 @@ def clean_text_for_speech(text: str) -> str:
     # Clean up excessive whitespace
     return re.sub(r'\s+', ' ', text).strip()
 
-def speak_text(text: str, audio_bytes: Optional[bytes] = None, mime_type: Optional[str] = None) -> None:
+def speak_text(text: str, audio_bytes: bytes | None = None, mime_type: str | None = None) -> None:
     """
     Plays speech audio.
     If pre-synthesized audio_bytes are provided, plays them directly.

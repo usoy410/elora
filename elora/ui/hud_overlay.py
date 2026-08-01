@@ -4,7 +4,7 @@ Centers configurations, logs, and settings overlays cleanly on screen.
 """
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 
 class EloraModalOverlay(QWidget):

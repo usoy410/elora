@@ -3,9 +3,8 @@ Utility modules for Elora's Linux desktop integrations.
 Provides system notifications via notify-send and audio cues via aplay.
 """
 
-import subprocess
 import logging
-from typing import Optional
+import subprocess
 
 # Setup logger for the package
 logger = logging.getLogger("elora.utils")
@@ -32,7 +31,7 @@ def send_notification(title: str, message: str) -> None:
         logger.warning("notify-send utility not found. Notification skipped: %s - %s", title, message)
 
 
-def play_chime(sound_path: Optional[str] = None) -> Optional[subprocess.Popen]:
+def play_chime(sound_path: str | None = None) -> subprocess.Popen | None:
     """
     Plays a subtle audio chime using the system's aplay tool.
     
@@ -81,8 +80,8 @@ def is_destructive_command(cmd: str) -> bool:
     
     Why: Prevents accidental system damage while allowing harmless info-gathering tasks.
     """
-    import shlex
     import os
+    import shlex
     cmd_lower = cmd.lower()
     
     # 1. Check for dangerous executables
@@ -126,8 +125,9 @@ def ensure_processed_video_frames() -> None:
     """
     import os
     import shutil
-    import tempfile
     import subprocess
+    import tempfile
+
     import numpy as np
     from PySide6.QtGui import QImage
 
