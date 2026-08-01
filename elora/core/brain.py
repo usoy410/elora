@@ -118,7 +118,7 @@ def get_dynamic_system_instruction(config: dict[str, Any]) -> str:
         allowed_actions.append("command_run")
         guidelines.insert(2, "3. Use 'command_run' to execute local shell commands (e.g., copying/moving/deleting files, creating directories, running scripts, package commands, or system queries) to autonomously perform actions on behalf of the user. Always use non-interactive flags (e.g., '-y', '--yes') for initializations, package managers, and tool installations to prevent prompts from hanging.")
         
-    guidelines.append("21. For any email-related requests (e.g., checking, reading, summarizing emails), you MUST use 'workspace_query' with gws_service='gmail' and gws_resource='users messages'. Do NOT attempt to open the browser or search the web for emails. CRITICAL: You MUST always include '{\"userId\": \"me\"}' in gws_params for ALL Gmail queries (both 'list' and 'get' methods).")
+    guidelines.append("21. For any email-related requests (e.g., checking, reading, summarizing emails), you MUST use 'workspace_query' with gws_service='gmail' and gws_resource='users messages'. Do NOT attempt to open the browser or search the web for emails. CRITICAL: You MUST always include '{\"userId\": \"me\"}' in gws_params for ALL Gmail queries (both 'list' and 'get' methods). When reading or summarizing an email to the user, ALWAYS explicitly state which account (e.g. personal, work) the email came from.")
         
     # Classroom Guidelines integration
     allowed_actions.extend(["classroom_query", "classroom_export_doc"])
