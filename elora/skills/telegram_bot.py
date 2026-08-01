@@ -11,15 +11,8 @@ from __future__ import annotations
 
 import socket
 
-# Force IPv4 only to bypass hanging on unreachable IPv6 addresses in some Linux environments.
-# Why: httpx can get stuck attempting connections to IPv6 addresses that have no route,
-# whereas curl falls back to IPv4 immediately.
-_orig_getaddrinfo = socket.getaddrinfo
-def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    if family == socket.AF_UNSPEC:
-        family = socket.AF_INET
-    return _orig_getaddrinfo(host, port, family, type, proto, flags)
-socket.getaddrinfo = _ipv4_only_getaddrinfo
+from elora.utils import enable_ipv4_only_socket
+enable_ipv4_only_socket()
 
 import asyncio
 import json
@@ -127,18 +120,14 @@ def _zip_directory(dir_path: str, exclude_patterns: list[str]) -> str:
     Returns:
         The path to the generated zip file.
     """
-    temp_zip = tempfile.mktemp(suffix=".zip")
-    with zipfile.ZipFile(temp_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, dirs, files in os.walk(dir_path):
-            # Mutate dirs in place to prevent os.walk from traversing excluded directories
-            dirs[:] = [d for d in dirs if d not in exclude_patterns]
-            for file in files:
-                if file in exclude_patterns:
-                    continue
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, dir_path)
-                zipf.write(file_path, arcname)
-    return temp_zip
+    import shutil
+    temp_dir = tempfile.mkdtemp()
+    copy_dest = os.path.join(temp_dir, "archive")
+    shutil.copytree(dir_path, copy_dest, ignore=shutil.ignore_patterns(*exclude_patterns))
+    temp_zip_base = tempfile.mktemp()
+    shutil.make_archive(temp_zip_base, 'zip', copy_dest)
+    shutil.rmtree(temp_dir)
+    return temp_zip_base + ".zip"
 
 
 def _get_allowed_ids() -> set[int]:
@@ -375,7 +364,7 @@ def _sync_process_prompt(prompt: str) -> tuple[dict, bool]:
         logger.warning("Auto-approved destructive command via Telegram: %s %s", action, args)
         return True
 
-    def screenshot_callback() -> bool:
+    def screenshot_callback(source: str) -> bool:
         """Capture a desktop screenshot for visual queries."""
         try:
             capture_desktop_screenshot()

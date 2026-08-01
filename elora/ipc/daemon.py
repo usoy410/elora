@@ -6,15 +6,8 @@ and communicates with the HUD front-end via Unix sockets.
 
 import socket
 
-# Force IPv4 only to bypass hanging on unreachable IPv6 addresses in some Linux environments.
-# Why: httpx can get stuck attempting connections to IPv6 addresses that have no route,
-# whereas curl falls back to IPv4 immediately.
-_orig_getaddrinfo = socket.getaddrinfo
-def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    if family == socket.AF_UNSPEC:
-        family = socket.AF_INET
-    return _orig_getaddrinfo(host, port, family, type, proto, flags)
-socket.getaddrinfo = _ipv4_only_getaddrinfo
+from elora.utils import enable_ipv4_only_socket
+enable_ipv4_only_socket()
 
 import json
 import logging
@@ -356,10 +349,10 @@ def handle_client(conn: socket.socket):
                                 logger.error("Error waiting for user confirmation via IPC: %s", e)
                                 return False
 
-                        def screenshot_cb() -> bool:
+                        def screenshot_cb(source: str) -> bool:
                             try:
                                 # Send screenshot request over the socket
-                                payload = {"status": "screenshot_request"}
+                                payload = {"status": "screenshot_request", "source": source}
                                 conn.sendall((json.dumps(payload) + "\n").encode("utf-8"))
                                 
                                 # Read response synchronously
