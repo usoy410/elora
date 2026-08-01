@@ -1256,7 +1256,6 @@ class EloraHUD(QWidget):
 
         self.is_recording = True
         self.update_state_ui("listening", "● LISTENING...")
-        self.console_output.append("<br><span style='color: #EC4899;'>System:</span> Recording...")
 
         # Play alert chime to notify the user that they can speak
         try:
@@ -1311,7 +1310,6 @@ class EloraHUD(QWidget):
 
         self.greeting_discarded = True
         self.reset_to_idle()
-        self.console_output.append(f"<span style='color: #EC4899;'>System:</span> Transcribed: \"{text}\"")
         self.send_query(text)
 
     def send_query(self, text: str):
@@ -1418,14 +1416,16 @@ class EloraHUD(QWidget):
             if output:
                 import html
                 escaped_output = html.escape(str(output).strip())
+                if len(escaped_output) > 600:
+                    escaped_output = escaped_output[:600] + "\n...[truncated for display]"
                 self.console_output.append(
-                    f"<details style='margin-left: 12px; color: #9CA3AF;'>"
-                    f"<summary style='color: #34D399; font-size: 11px; cursor: pointer;'>✔️ View output details</summary>"
+                    f"<div style='margin-left: 12px; color: #9CA3AF;'>"
+                    f"<div style='color: #34D399; font-size: 11px; margin-bottom: 2px;'>✔️ Tool execution completed:</div>"
                     f"<pre style='font-family: monospace; font-size: 10px; background-color: rgba(0, 0, 0, 0.25); "
                     f"padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05); white-space: pre-wrap;'>"
                     f"{escaped_output}"
                     f"</pre>"
-                    f"</details>"
+                    f"</div>"
                 )
             else:
                 self.console_output.append(
