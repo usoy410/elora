@@ -12,6 +12,7 @@ import wave
 import urllib.request
 import soundfile as sf
 from typing import Optional
+import re
 
 from elora.core.config import load_config
 from elora.utils import play_chime
@@ -390,7 +391,17 @@ def synthesize_cloud_speech(text: str, space_url: str, voice_name: str, speed: f
         logger.error("Error communicating with cloud Kokoro TTS Space: %s", e)
         
     return None
-
+def clean_text_for_speech(text: str) -> str:
+    """Removes code blocks, URLs, and markdown artifacts to prevent jarring TTS output."""
+    if not text: return text
+    # Remove markdown code blocks
+    text = re.sub(r'```.*?```', ' [Code block omitted] ', text, flags=re.DOTALL)
+    # Remove inline code blocks
+    text = re.sub(r'`[^`]+`', ' [Code snippet omitted] ', text)
+    # Remove URLs
+    text = re.sub(r'https?://[^\s]+', ' [Link omitted] ', text)
+    # Clean up excessive whitespace
+    return re.sub(r'\s+', ' ', text).strip()
 
 def speak_text(text: str, audio_bytes: Optional[bytes] = None, mime_type: Optional[str] = None) -> None:
     """
@@ -398,6 +409,7 @@ def speak_text(text: str, audio_bytes: Optional[bytes] = None, mime_type: Option
     If pre-synthesized audio_bytes are provided, plays them directly.
     Otherwise, uses local/cloud Kokoro voice synthesis.
     """
+    text = clean_text_for_speech(text)
     global _active_playback_process
     
     config = load_config()

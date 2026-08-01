@@ -710,11 +710,11 @@ def _clean_markdown_text(text: str) -> str:
 def save_classroom_document(content: str, filename: str, file_format: str = "md") -> str:
     """
     Saves a text document (e.g. study guide or response draft) in TXT, MD, or PDF format.
-    Saves to the user's Documents/Elora_Classroom folder.
+    Saves to the user's Documents/EloraWorkspace/Classroom folder.
     Returns a success message with the file path or an error.
     """
     # Create the target directory
-    doc_dir = os.path.expanduser("~/Documents/elora/elora_classroom")
+    doc_dir = os.path.expanduser("~/Documents/EloraWorkspace/Classroom")
     try:
         os.makedirs(doc_dir, exist_ok=True)
     except Exception as e:

@@ -210,9 +210,9 @@ def execute_agent_task(prompt: str) -> str:
     is_classroom = any(kw in prompt.lower() for kw in classroom_keywords)
     
     if is_classroom:
-        base_dir = os.path.expanduser("~/Documents/elora/elora_classroom")
+        base_dir = os.path.expanduser("~/Documents/EloraWorkspace/Classroom")
     else:
-        base_dir = os.path.expanduser("~/Documents/elora/elora_projects")
+        base_dir = os.path.expanduser("~/Documents/EloraWorkspace/Projects")
         
     # Extract or generate a clean project directory name
     import re
